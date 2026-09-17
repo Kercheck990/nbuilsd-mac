@@ -1,0 +1,84 @@
+name: nft_grader
+description: "NFT-Grader — апгрейдер NFT-подарков (Flutter клиент + Node/Postgres бэкенд)."
+publish_to: 'none'
+version: 1.1.0+2
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+  flutter: ">=3.19.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # Состояние
+  flutter_riverpod: ^2.5.1
+
+  # Навигация
+  go_router: ^14.2.0
+
+  # Сеть
+  dio: ^5.4.3+1
+
+  # Открытие ссылки оплаты во внешнем браузере
+  url_launcher: ^6.3.0
+
+  # Локальное хранилище
+  shared_preferences: ^2.2.3
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+
+  # Анимации и эффекты
+  flutter_animate: ^4.5.0
+  confetti: ^0.7.0
+
+  # Звук и вибрация
+  audioplayers: ^6.0.0
+  just_audio: ^0.9.46
+  youtube_explode_dart: ^2.4.2
+
+  # Окно и полноэкранный режим (Windows)
+  window_manager: ^0.3.8
+
+  # Утилиты
+  intl: 0.20.3
+  crypto: ^3.0.3
+  equatable: ^2.0.5
+  uuid: ^4.4.0
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  hive_generator: ^2.0.1
+  build_runner: ^2.4.11
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    # Папка подарков подключена целиком: достаточно положить файл в
+    # assets/gifts/ и перезапустить приложение.
+    - assets/gifts/
+    - assets/case/
+    - assets/abuse/
+    - assets/sounds/
+    - assets/nickpik/
+    - assets/iconmainmenu/
+    # Логотип приложения (экраны входа, регистрации, сплэш).
+    # Основной файл — nftgradelogo.png, запасной — logonftgrade.png.
+    - assets/logonftgrade.png
+    # Положите файл assets/nftgradelogo.png и раскомментируйте строку ниже.
+    # - assets/nftgradelogo.png
+
+  # fonts:
+  #   - family: Manrope
+  #     fonts:
+  #       - asset: assets/fonts/Manrope-Regular.ttf
+  #       - asset: assets/fonts/Manrope-Bold.ttf
+  #         weight: 700
+  #       - asset: assets/fonts/Manrope-ExtraBold.ttf
+  #         weight: 800
