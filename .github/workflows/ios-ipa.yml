@@ -1,14 +1,9 @@
-name: Build iOS IPA (from Windows via GitHub)
+﻿name: Build iOS IPA (from Windows via GitHub)
 
 on:
   workflow_dispatch:
-    inputs:
-      signed:
-        description: 'Собрать подписанный IPA (нужен Apple Team в Secrets)'
-        type: boolean
-        default: false
   push:
-    branches: [ main, master, dev ]
+    branches: [ main ]
 
 jobs:
   build-ios:
@@ -34,9 +29,7 @@ jobs:
           pod install --repo-update
           cd ..
 
-      # ── UNSIGNED (без подписи) — для Sideloadly / AltStore с Windows ──
-      - name: Build iOS (unsigned)
-        if: ${{ inputs.signed != true }}
+      - name: Build iOS unsigned
         run: |
           flutter build ios --release --no-codesign
           mkdir -p build/ios/ipa
@@ -46,39 +39,12 @@ jobs:
           zip -r ../ipa/Runner-unsigned.ipa Payload
           rm -rf Payload
           cd ../../..
+          ls -lh build/ios/ipa/
 
-      # ── SIGNED (нужны Secrets) — для TestFlight / реальный iPhone ──
-      - name: Import signing (only if signed=true)
-        if: ${{ inputs.signed == true }}
-        env:
-          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
-          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
-          APPLE_PROVISIONING_PROFILE: ${{ secrets.APPLE_PROVISIONING_PROFILE }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-        run: |
-          # Создаёт временный keychain и ставит сертификат
-          CERT_PATH=$RUNNER_TEMP/build_certificate.p12
-          PP_PATH=$RUNNER_TEMP/profile.mobileprovision
-          echo -n "$APPLE_CERTIFICATE_P12" | base64 --decode -o $CERT_PATH
-          echo -n "$APPLE_PROVISIONING_PROFILE" | base64 --decode -o $PP_PATH
-          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-          security import $CERT_PATH -P "$APPLE_CERT_PASSWORD" -A -t cert -f pkcs12 -k build.keychain
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles/
-
-      - name: Build IPA (signed)
-        if: ${{ inputs.signed == true }}
-        run: flutter build ipa --release --export-options-plist=ios/ExportOptions.plist
-
-      - name: Upload artifact
+      - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: ios-ipa-${{ inputs.signed && 'signed' || 'unsigned' }}
-          path: |
-            build/ios/ipa/*.ipa
-            build/ios/iphoneos/*.app
-          if-no-files-found: warn
+          name: ios-unsigned-ipa
+          path: build/ios/ipa/*.ipa
+          if-no-files-found: error
           retention-days: 7
