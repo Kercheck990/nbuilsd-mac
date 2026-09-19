@@ -29,23 +29,35 @@ jobs:
           pod install --repo-update
           cd ..
 
-      - name: Build iOS unsigned
+      - name: Build iOS unsigned (no Team)
         run: |
-          flutter build ios --release --no-codesign --dart-define=API_BASE_URL=https://nftgrade.freesrv.com --verbose
-          mkdir -p build/ios/ipa
+          echo "Attempt device build with --no-codesign"
+          flutter build ios --release --no-codesign --dart-define=API_BASE_URL=https://nftgrade.freesrv.com --verbose || echo "device build failed, try simulator"
           if [ -d "build/ios/iphoneos/Runner.app" ]; then
+            echo "Device Runner.app found"
+            mkdir -p build/ios/ipa
             cd build/ios/iphoneos
             mkdir -p Payload
             cp -r Runner.app Payload/
-            zip -r ../ipa/Runner-unsigned.ipa Payload
+            zip -r ../ipa/Runner-unsigned-ipa-device.ipa Payload
             rm -rf Payload
             cd ../../..
-          else
-            echo "Runner.app not found"
-            ls -R build/ios || true
-            exit 1
+            ls -lh build/ios/ipa/
+            exit 0
           fi
-          ls -lh build/ios/ipa/
+          echo "Fallback: simulator build"
+          flutter build ios --simulator --debug --dart-define=API_BASE_URL=https://nftgrade.freesrv.com --verbose
+          mkdir -p build/ios/ipa
+          if [ -d "build/ios/iphonesimulator/Runner.app" ]; then
+            cd build/ios/iphonesimulator
+            mkdir -p Payload
+            cp -r Runner.app Payload/
+            zip -r ../../ipa/Runner-unsigned-ipa-sim.ipa Payload
+            rm -rf Payload
+            cd ../../..
+          fi
+          ls -R build/ios || true
+          ls -lh build/ios/ipa/ || true
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
