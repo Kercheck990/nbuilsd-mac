@@ -290,6 +290,26 @@ adminRouter.post('/music/stop', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+/// POST /api/admin/events/:key/on — включить ивент на N минут (таймер в app_settings event_<key>_until)
+adminRouter.post('/events/:key/on', async (req, res, next) => {
+  try {
+    const key = String(req.params.key || '').trim();
+    if (!['x2','x4','saves'].includes(key)) return bad(res, 'bad_key', 'unknown event');
+    const minutes = Math.max(1, Math.min(1440, parseInt(req.body.duration_minutes, 10) || 15));
+    const until = new Date(Date.now() + minutes * 60000).toISOString();
+    await query(`INSERT INTO app_settings (key, value, updated_at) VALUES ($1,$2,now()) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [`event_${key}_until`, until]);
+    res.json({ ok: true, key, until });
+  } catch (err) { next(err); }
+});
+adminRouter.post('/events/:key/off', async (req, res, next) => {
+  try {
+    const key = String(req.params.key || '').trim();
+    if (!['x2','x4','saves'].includes(key)) return bad(res, 'bad_key', 'unknown event');
+    await query(`DELETE FROM app_settings WHERE key=$1`, [`event_${key}_until`]);
+    res.json({ ok: true, key });
+  } catch (err) { next(err); }
+});
+
 /// POST /api/admin/broadcast — написать всем игрокам от своего лица.
 adminRouter.post('/broadcast', async (req, res, next) => {
   try {
