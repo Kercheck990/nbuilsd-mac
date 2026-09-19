@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../features/admin/admin_screen.dart';
 import '../../features/auth/providers/auth_provider.dart';
+import '../../features/auth/screens/banned_screen.dart';
 import '../../features/auth/screens/login_screen.dart';
 import '../../features/auth/screens/register_screen.dart';
 import '../../features/auth/screens/tfa_screen.dart';
@@ -11,8 +12,10 @@ import '../../features/auth/screens/verify_code_screen.dart';
 import '../../features/cases/screens/case_detail_screen.dart';
 import '../../features/cases/screens/cases_screen.dart';
 import '../../features/history/history_screen.dart';
+import '../../features/index/index_screen.dart';
 import '../../features/inventory/inventory_screen.dart';
 import '../../features/leaderboard/leaderboard_screen.dart';
+import '../../features/daily/daily_screen.dart';
 import '../../features/menu/main_menu_screen.dart';
 import '../../features/settings/settings_screen.dart';
 import '../../features/shop/shop_screen.dart';
@@ -71,11 +74,12 @@ final routerProvider = Provider<GoRouter>((ref) {
         return loc == '/' ? null : '/';
       }
 
-      const authRoutes = {'/login', '/register', '/verify', '/tfa'};
+      const authRoutes = {'/login', '/register', '/verify', '/tfa', '/banned'};
 
       switch (auth.status) {
+        case AuthStatus.banned:
+          return loc == '/banned' ? null : '/banned';
         case AuthStatus.unauthenticated:
-          // Пускаем только на /login и /register.
           return (loc == '/login' || loc == '/register') ? null : '/login';
         case AuthStatus.pendingVerification:
           return loc == '/verify' ? null : '/verify';
@@ -84,6 +88,9 @@ final routerProvider = Provider<GoRouter>((ref) {
         case AuthStatus.authenticated:
           return (authRoutes.contains(loc) || loc == '/') ? '/home' : null;
         case AuthStatus.unknown:
+          return null;
+        // ignore: unreachable_switch_default
+        default:
           return null;
       }
     },
@@ -184,6 +191,18 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/cases/:id',
         pageBuilder: (c, s) => _fadeThrough(
             child: CaseDetailScreen(caseId: s.pathParameters['id'] ?? ''), state: s),
+      ),
+      GoRoute(
+        path: '/banned',
+        pageBuilder: (c, s) => _fadeThrough(child: const BannedScreen(), state: s),
+      ),
+      GoRoute(
+        path: '/daily',
+        pageBuilder: (c, s) => _fadeThrough(child: const DailyScreen(), state: s),
+      ),
+      GoRoute(
+        path: '/index',
+        pageBuilder: (c, s) => _fadeThrough(child: const IndexScreen(), state: s),
       ),
     ],
   );
