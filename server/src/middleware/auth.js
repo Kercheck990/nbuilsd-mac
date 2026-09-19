@@ -52,7 +52,7 @@ export function publicUser(u) {
     avatar_url: u.avatar_url,
     locale: u.locale,
     balance_coins: Number(u.balance_coins),
-    balance_nc: Number(u.balance_nc ?? 30),
+    balance_nc: Number(u.balance_nc ?? 0),
     email_verified: u.email_verified,
     is_admin: !!u.is_admin,
     is_banned: !!u.is_banned,

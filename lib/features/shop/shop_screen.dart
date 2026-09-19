@@ -154,32 +154,6 @@ class _ShopScreenState extends ConsumerState<ShopScreen>
                             children: [
                               Row(
                                 children: [
-                                  Container(
-                                    width: 84,
-                                    height: 84,
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(18),
-                                      gradient: RadialGradient(
-                                        colors: [
-                                          green.withOpacity(0.30),
-                                          Colors.transparent
-                                        ],
-                                      ),
-                                    ),
-                                    alignment: Alignment.center,
-                                    child: Text(
-                                      '🛍️',
-                                      style: TextStyle(
-                                        fontSize: 48,
-                                        shadows: [
-                                          Shadow(
-                                              color: green.withOpacity(0.6),
-                                              blurRadius: 16)
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 14),
                                   Expanded(
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,

@@ -3,10 +3,10 @@
 -- Идемпотентна: можно применять повторно (npm run migrate).
 -- ===================================================================
 
--- --- NC валюта --------------------------------------------------------
-ALTER TABLE users ADD COLUMN IF NOT EXISTS balance_nc BIGINT NOT NULL DEFAULT 30 CHECK (balance_nc >= 0);
--- существующим игрокам у кого 0 (старые аккаунты) — выдать стартовые 30
-UPDATE users SET balance_nc = 30 WHERE balance_nc = 0;
+-- --- NC валюта (стартовый 0, выдается только админом) ------------------------
+ALTER TABLE users ADD COLUMN IF NOT EXISTS balance_nc BIGINT NOT NULL DEFAULT 0 CHECK (balance_nc >= 0);
+-- всем у кого 30 стартовых — обнулить (премиум только через админку)
+UPDATE users SET balance_nc = 0 WHERE balance_nc = 30;
 
 -- расширяем ledger для аудита NC (0 если операция только с coins)
 ALTER TABLE ledger ADD COLUMN IF NOT EXISTS delta_nc BIGINT NOT NULL DEFAULT 0;

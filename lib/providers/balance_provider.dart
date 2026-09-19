@@ -7,6 +7,7 @@ class UserNotifier extends StateNotifier<AppUser> {
           id: 'local_user',
           displayName: 'Player',
           balanceCoins: 0,
+          balanceNc: 0,
         ));
 
   /// Подставляет пользователя, пришедшего с сервера (после входа или
@@ -20,7 +21,7 @@ class UserNotifier extends StateNotifier<AppUser> {
         id: 'guest',
         displayName: 'Guest',
         balanceCoins: 0,
-        balanceNc: 30,
+        balanceNc: 0,
       );
 
   void addCoins(int amount) {

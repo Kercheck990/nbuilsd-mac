@@ -182,7 +182,7 @@ adminRouter.post('/wipe', async (req, res, next) => {
     await query(`DELETE FROM case_openings WHERE user_id IN (SELECT id FROM users WHERE NOT is_admin)`);
     await query(`DELETE FROM trades WHERE from_user IN (SELECT id FROM users WHERE NOT is_admin) OR to_user IN (SELECT id FROM users WHERE NOT is_admin)`);
     await query(`DELETE FROM top_rewards WHERE user_id IN (SELECT id FROM users WHERE NOT is_admin)`);
-    await query(`UPDATE users SET balance_coins = 0, balance_nc = 30, playtime_seconds = 0 WHERE NOT is_admin`);
+    await query(`UPDATE users SET balance_coins = 0, balance_nc = 0, playtime_seconds = 0 WHERE NOT is_admin`);
     await query(`DELETE FROM user_showcase WHERE user_id IN (SELECT id FROM users WHERE NOT is_admin)`);
     res.json({ ok: true });
   } catch (err) { next(err); }

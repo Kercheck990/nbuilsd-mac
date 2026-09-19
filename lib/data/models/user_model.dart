@@ -22,7 +22,7 @@ class AppUser extends Equatable {
     required this.id,
     required this.displayName,
     required this.balanceCoins,
-    this.balanceNc = 30,
+    this.balanceNc = 0,
     this.email,
     this.avatarUrl,
     this.walletAddress,
@@ -79,7 +79,7 @@ class AppUser extends Equatable {
       email: json['email'] as String?,
       avatarUrl: json['avatar_url'] as String?,
       balanceCoins: (json['balance_coins'] as num?)?.toInt() ?? 0,
-      balanceNc: (json['balance_nc'] as num?)?.toInt() ?? 30,
+      balanceNc: (json['balance_nc'] as num?)?.toInt() ?? 0,
       telegramHandle: json['telegram_username'] as String?,
       isAdmin: json['is_admin'] as bool? ?? false,
       badges: ((json['badges'] as List?) ?? const [])
