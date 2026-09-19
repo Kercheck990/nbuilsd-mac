@@ -25,6 +25,8 @@ class InventoryScreen extends ConsumerStatefulWidget {
 class _InventoryScreenState extends ConsumerState<InventoryScreen> {
   InventorySort _sort = InventorySort.priceDesc;
   NftRarity? _rarityFilter;
+  bool _selling = false;
+  bool _sellingAll = false;
 
   List<NftItem> _apply(List<NftItem> items) {
     var list = _rarityFilter == null
@@ -55,6 +57,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
   }
 
   Future<void> _sellAll() async {
+    if (_sellingAll) return;
     final all = ref.read(inventoryProvider);
     final toSell = all.where((e) => !e.isStarred).toList();
     if (toSell.isEmpty) {
@@ -75,6 +78,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
       ),
     );
     if (confirmed != true || !mounted) return;
+    setState(() => _sellingAll = true);
     try {
       final res = await ApiClient.instance.sellAll();
       final nc = res['balance_nc'] as int? ?? res['balance'] as int? ?? 0;
@@ -85,6 +89,8 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     } catch (_) {
       if (!mounted) return;
       TopNotify.show(context, l10n.t('error_network'), success: false);
+    } finally {
+      if (mounted) setState(() => _sellingAll = false);
     }
   }
 
@@ -150,6 +156,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
   }
 
   Future<void> _sell(NftItem item) async {
+    if (_selling) return;
     if (item.isStarred) {
       TopNotify.show(context, 'Снимите ⭐ чтобы продать', success: false);
       return;
@@ -177,7 +184,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
       ),
     );
     if (confirmed != true || !mounted) return;
-
+    setState(() => _selling = true);
     try {
       final ncBalance = await ApiClient.instance.sellItem(item.id);
       ref.read(userProvider.notifier).setNc(ncBalance);
@@ -186,8 +193,10 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
       TopNotify.show(context, 'Продано за ${item.priceInCoins} NC', success: true);
     } on ApiException catch (e) {
       if (!mounted) return;
-      final msg = e.code == 'starred' ? 'Снимите ⭐ чтобы продать' : l10n.t('error_network');
+      final msg = e.code == 'starred' ? 'Снимите ⭐ чтобы продать' : e.code == 'too_many_requests' ? 'Подожди секунду' : l10n.t('error_network');
       TopNotify.show(context, msg, success: false);
+    } finally {
+      if (mounted) setState(() => _selling = false);
     }
   }
 
@@ -277,7 +286,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                             ),
                           ),
                           TextButton(
-                            onPressed: all.isEmpty ? null : _sellAll,
+                            onPressed: (all.isEmpty || _sellingAll) ? null : _sellAll,
                             style: TextButton.styleFrom(
                               backgroundColor: green.withOpacity(0.12),
                               foregroundColor: green,

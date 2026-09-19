@@ -1,10 +1,19 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import { config } from '../config.js';
 import { applyBalance, applyNcBalance, query, withTransaction } from '../db.js';
 import { publicUser, requireAuth } from '../middleware/auth.js';
 
 export const userRouter = express.Router();
 userRouter.use(requireAuth);
+
+const sellLimiter = rateLimit({
+  windowMs: 2000,
+  limit: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'too_many_requests', message: 'Слишком часто' },
+});
 
 /// GET /api/me
 userRouter.get('/me', (req, res) => {
@@ -53,23 +62,26 @@ userRouter.post('/inventory/:id/star', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-/// POST /api/inventory/sell-all — продать все незазвёздоченные (выплата в NC)
-userRouter.post('/inventory/sell-all', async (req, res, next) => {
+/// POST /api/inventory/sell-all — продать все незазвёздоченные (выплата в NC) — атомарно, защита от дюпа
+userRouter.post('/inventory/sell-all', sellLimiter, async (req, res, next) => {
   try {
     const result = await withTransaction(async (client) => {
       const { rows } = await client.query(
-        `SELECT inv.id, it.price_coins FROM inventory inv
-           JOIN items it ON it.id=inv.item_id
-          WHERE inv.user_id=$1 AND inv.status='open' AND COALESCE(inv.is_starred,false)=false
-          FOR UPDATE OF inv`,
+        `UPDATE inventory SET status='sold'
+          WHERE id IN (
+            SELECT inv.id FROM inventory inv
+            WHERE inv.user_id=$1 AND inv.status='open' AND COALESCE(inv.is_starred,false)=false
+            FOR UPDATE OF inv
+          )
+          RETURNING id, item_id`,
         [req.user.id]
       );
       if (!rows.length) return { sold:0, gained:0, balance: req.user.balance_nc, balance_nc: req.user.balance_nc };
+      // считаем сумму по ценам из items
       let total=0;
       for (const r of rows) {
-        const price=Math.floor(r.price_coins*config.game.sellRatio);
-        await client.query(`UPDATE inventory SET status='sold' WHERE id=$1`,[r.id]);
-        total+=price;
+        const pr = await client.query(`SELECT price_coins FROM items WHERE id=$1`, [r.item_id]);
+        total+=Math.floor((pr.rows[0]?.price_coins||0)*config.game.sellRatio);
       }
       const balance=await applyNcBalance(client, req.user.id, total, 'sell_all', `sell_all:${rows.length}`);
       return { sold: rows.length, gained: total, balance, balance_nc: balance, balance_coins: req.user.balance_coins };
@@ -78,25 +90,27 @@ userRouter.post('/inventory/sell-all', async (req, res, next) => {
   } catch (err){ next(err); }
 });
 
-/// POST /api/inventory/:id/sell — продать предмет за NC.
-userRouter.post('/inventory/:id/sell', async (req, res, next) => {
+/// POST /api/inventory/:id/sell — продать предмет за NC (идемпотентно).
+userRouter.post('/inventory/:id/sell', sellLimiter, async (req, res, next) => {
   try {
     const result = await withTransaction(async (client) => {
+      // сначала проверяем звёздочку, затем атомарно продаём только если open
+      const check = await client.query(
+        `SELECT COALESCE(is_starred,false) as is_starred FROM inventory WHERE id=$1 AND user_id=$2 AND status='open' FOR UPDATE`,
+        [req.params.id, req.user.id]
+      );
+      if (!check.rows.length) return null;
+      if (check.rows[0].is_starred) return { starred: true };
+
       const { rows } = await client.query(
-        `SELECT inv.id, it.price_coins, COALESCE(inv.is_starred,false) as is_starred
-           FROM inventory inv
-           JOIN items it ON it.id = inv.item_id
-          WHERE inv.id = $1 AND inv.user_id = $2 AND inv.status = 'open'
-          FOR UPDATE OF inv`,
+        `UPDATE inventory SET status='sold'
+          WHERE id=$1 AND user_id=$2 AND status='open' AND COALESCE(is_starred,false)=false
+          RETURNING id, item_id`,
         [req.params.id, req.user.id]
       );
       if (!rows.length) return null;
-      if (rows[0].is_starred) return { starred: true };
-
-      const price = Math.floor(rows[0].price_coins * config.game.sellRatio);
-      await client.query(`UPDATE inventory SET status = 'sold' WHERE id = $1`, [
-        rows[0].id,
-      ]);
+      const pr = await client.query(`SELECT price_coins FROM items WHERE id=$1`, [rows[0].item_id]);
+      const price = Math.floor((pr.rows[0]?.price_coins||0) * config.game.sellRatio);
       const balance = await applyNcBalance(
         client,
         req.user.id,
