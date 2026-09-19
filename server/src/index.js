@@ -1,14 +1,20 @@
 import cors from 'cors';
 import express from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
 
 import { config } from './config.js';
 import { pool } from './db.js';
 import { adminRouter } from './routes/admin.js';
 import { authRouter } from './routes/auth.js';
 import { casesRouter } from './routes/cases.js';
+import { dailyRouter, dailyAdminRouter } from './routes/daily.js';
 import { itemsRouter } from './routes/items.js';
 import { leaderboardRouter } from './routes/leaderboard.js';
+import { notificationsRouter } from './routes/notifications.js';
 import { paymentsRouter } from './routes/payments.js';
+import { shopRouter } from './routes/shop.js';
 import { promocodesRouter } from './routes/promocodes.js';
 import { telegramRouter } from './routes/telegram.js';
 import { ticketsRouter } from './routes/tickets.js';
@@ -19,6 +25,12 @@ import { userRouter } from './routes/user.js';
 const app = express();
 app.set('trust proxy', 1);
 app.use(cors());
+// Статика для загруженной музыки: /music/<file> -> server/public/music/
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const musicPublicDir = path.join(__dirname, '../public/music');
+try { fs.mkdirSync(musicPublicDir, { recursive: true }); } catch {}
+app.use('/music', express.static(musicPublicDir));
+app.use('/public', express.static(path.join(__dirname, '../public')));
 
 // ВАЖНО: вебхуки должны получить СЫРОЕ тело, иначе подпись провайдера
 // не сойдётся. Поэтому raw-парсер подключается до express.json().
@@ -54,6 +66,10 @@ app.use('/api/leaderboard', leaderboardRouter);
 app.use('/api/trades', tradesRouter);
 app.use('/api/tickets', ticketsRouter);
 app.use('/api/promocodes', promocodesRouter);
+app.use('/api/notifications', notificationsRouter);
+app.use('/api/daily', dailyRouter);
+app.use('/api', dailyAdminRouter);
+app.use('/api/shop', shopRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/telegram', telegramRouter);
 app.use('/api', userRouter); // /api/me, /api/inventory, /api/history, ...
@@ -80,7 +96,12 @@ app.use((req, res) => {
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   console.error('Необработанная ошибка:', err);
-  res.status(500).json({ error: 'internal_error', message: 'Внутренняя ошибка сервера' });
+  if (err.type === 'entity.parse.failed' || err.status === 400 || err.statusCode === 400) {
+    return res.status(400).json({ error: 'bad_request', message: 'Некорректный JSON' });
+  }
+  const status = err.status || err.statusCode || 500;
+  const code = err.code || (status === 400 ? 'bad_request' : 'internal_error');
+  res.status(status).json({ error: code, message: err.message || 'Внутренняя ошибка сервера' });
 });
 
 const server = app.listen(config.port, () => {

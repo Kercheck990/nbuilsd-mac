@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -37,7 +39,7 @@ class ApiClient {
       connectTimeout: AppConstants.apiTimeout,
       receiveTimeout: AppConstants.apiTimeout,
       headers: {'Content-Type': 'application/json'},
-      validateStatus: (s) => s != null && s < 500,
+      validateStatus: (s) => s != null && s < 600,
     ));
 
     _dio.interceptors.add(InterceptorsWrapper(
@@ -102,6 +104,16 @@ class ApiClient {
       if (data is Map<String, dynamic>) return data;
       return {'data': data};
     } on DioException catch (e) {
+      final rData = e.response?.data;
+      if (rData is Map && rData['error'] != null) {
+        final code = rData['error'].toString();
+        final msg = rData['message']?.toString() ?? e.message ?? 'Network error';
+        throw ApiException(code, msg, e.response?.statusCode);
+      }
+      final status = e.response?.statusCode;
+      if (status != null && status >= 400) {
+        throw ApiException('error_generic', e.response?.statusMessage ?? e.message ?? 'Network error', status);
+      }
       throw ApiException('error_network', e.message ?? 'Network error');
     }
   }
@@ -185,10 +197,10 @@ class ApiClient {
         .toList();
   }
 
-  /// Продажа предмета из инвентаря. Возвращает новый баланс.
+  /// Продажа предмета из инвентаря. Возвращает новый баланс NC (выплата в NC).
   Future<int> sellItem(String inventoryId) async {
     final res = await _request('POST', '/api/inventory/$inventoryId/sell');
-    return res['balance_coins'] as int;
+    return (res['balance_nc'] ?? res['balance_coins'] ?? res['balance']) as int;
   }
 
   Future<Map<String, dynamic>> starItem(String inventoryId, bool starred) =>
@@ -305,13 +317,18 @@ class ApiClient {
   /// Активные ивенты (x2/x4/Сейвы).
   Future<Map<String, dynamic>> events() => _request('GET', '/api/events');
 
-  /// Смена ника/языка.
-  Future<Map<String, dynamic>> updateMe({String? nickname, String? locale}) {
+  /// Смена ника/языка/аватарки.
+  Future<Map<String, dynamic>> updateMe({String? nickname, String? locale, String? avatarUrl}) {
     final body = <String, dynamic>{};
     if (nickname != null) body['nickname'] = nickname;
     if (locale != null) body['locale'] = locale;
+    if (avatarUrl != null) body['avatar_url'] = avatarUrl;
     return _request('PUT', '/api/me', body: body);
   }
+
+  Future<Map<String, dynamic>> getShowcase() => _request('GET', '/api/showcase');
+  Future<Map<String, dynamic>> setShowcase(List<String> inventoryIds) => _request('POST', '/api/showcase', body: {'inventory_ids': inventoryIds});
+  Future<Map<String, dynamic>> getObtained() => _request('GET', '/api/obtained');
 
   /// Публичный профиль игрока: статусы, статистика, витрина гифтов.
   Future<Map<String, dynamic>> publicProfile(String nickname) =>
@@ -418,6 +435,9 @@ class ApiClient {
         if (expiresAt != null) 'expires_at': expiresAt,
       });
 
+  Future<void> deletePromocode(String code) =>
+      _request('DELETE', '/api/promocodes/admin/${Uri.encodeComponent(code)}');
+
   // -------------------------------------------------------------------
   // Кейсы
   // -------------------------------------------------------------------
@@ -460,11 +480,92 @@ class ApiClient {
   Future<Map<String, dynamic>> adminBan({required String nickname, required bool banned}) =>
       _request('POST', '/api/admin/ban', body: {'nickname': nickname, 'banned': banned});
 
+  Future<Map<String, dynamic>> adminHideTop({required String nickname, required bool hide}) =>
+      _request('POST', '/api/admin/hide_top', body: {'nickname': nickname, 'hide': hide});
+
+  Future<Map<String, dynamic>> adminWipe() => _request('POST', '/api/admin/wipe', body: {'confirm': 'WIPE'});
+
   Future<Map<String, dynamic>> adminSettings() => _request('GET', '/api/admin/settings');
 
   Future<Map<String, dynamic>> setAdminSetting(String key, String value) =>
       _request('POST', '/api/admin/settings', body: {'key': key, 'value': value});
 
+  Future<Map<String, dynamic>> adminEventOn(String key, int durationMinutes) =>
+      _request('POST', '/api/admin/events/$key/on', body: {'duration_minutes': durationMinutes});
+
+  Future<Map<String, dynamic>> adminEventOff(String key) =>
+      _request('POST', '/api/admin/events/$key/off');
+
+  Future<Map<String, dynamic>> uploadMusic(String filePath) async {
+    final fileName = filePath.split(Platform.pathSeparator).last;
+    final formData = FormData.fromMap({
+      'music': await MultipartFile.fromFile(filePath, filename: fileName),
+    });
+    try {
+      final res = await _dio.post('/api/admin/music/upload',
+          data: formData,
+          options: Options(headers: {'Authorization': _token != null ? 'Bearer $_token' : null}));
+      final data = res.data;
+      if (res.statusCode! >= 400) {
+        final code = (data is Map && data['error'] != null) ? data['error'].toString() : 'error_generic';
+        final msg = (data is Map && data['message'] != null) ? data['message'].toString() : 'Upload failed';
+        throw ApiException(code, msg, res.statusCode);
+      }
+      if (data is Map<String, dynamic>) return data;
+      return {'data': data};
+    } on DioException catch (e) {
+      final rData = e.response?.data;
+      if (rData is Map && rData['error'] != null) {
+        final code = rData['error'].toString();
+        final msg = rData['message']?.toString() ?? e.message ?? 'Network error';
+        throw ApiException(code, msg, e.response?.statusCode);
+      }
+      throw ApiException('error_network', e.message ?? 'Network error');
+    }
+  }
+
+  Future<Map<String, dynamic>> musicList() => _request('GET', '/api/admin/music/list');
+  Future<Map<String, dynamic>> musicPlay(String file) => _request('POST', '/api/admin/music/play', body: {'file': file});
+  Future<Map<String, dynamic>> musicStop() => _request('POST', '/api/admin/music/stop');
+
   Future<Map<String, dynamic>> broadcast(String text) =>
       _request('POST', '/api/admin/broadcast', body: {'text': text});
+
+  Future<Map<String, dynamic>> adminItems(String search) =>
+      _request('GET', '/api/admin/items', query: {'search': search});
+  Future<Map<String, dynamic>> createAdminItem(Map<String, dynamic> body) =>
+      _request('POST', '/api/admin/items', body: body);
+  Future<Map<String, dynamic>> updateAdminItem(String id, Map<String, dynamic> body) =>
+      _request('PUT', '/api/admin/items/${Uri.encodeComponent(id)}', body: body);
+  Future<Map<String, dynamic>> deleteAdminItem(String id) =>
+      _request('DELETE', '/api/admin/items/${Uri.encodeComponent(id)}');
+
+  Future<Map<String, dynamic>> adminCasesAdmin() => _request('GET', '/api/admin/cases');
+  Future<Map<String, dynamic>> createAdminCase(Map<String, dynamic> body) =>
+      _request('POST', '/api/admin/cases', body: body);
+  Future<Map<String, dynamic>> updateAdminCase(String id, Map<String, dynamic> body) =>
+      _request('PUT', '/api/admin/cases/${Uri.encodeComponent(id)}', body: body);
+  Future<Map<String, dynamic>> deleteAdminCase(String id) =>
+      _request('DELETE', '/api/admin/cases/${Uri.encodeComponent(id)}');
+  Future<Map<String, dynamic>> adminCaseItems(String caseId) =>
+      _request('GET', '/api/admin/cases/${Uri.encodeComponent(caseId)}/items');
+  Future<Map<String, dynamic>> setAdminCaseItems(String caseId, List<Map<String, dynamic>> items) =>
+      _request('PUT', '/api/admin/cases/${Uri.encodeComponent(caseId)}/items', body: {'items': items});
+
+  // Notifications
+  Future<Map<String, dynamic>> notifications({int limit = 20}) =>
+      _request('GET', '/api/notifications', query: {'limit': limit});
+  Future<void> markNotificationRead(int id) => _request('POST', '/api/notifications/$id/read');
+  Future<void> markAllNotificationsRead() => _request('POST', '/api/notifications/read-all');
+
+  // Daily tasks
+  Future<Map<String, dynamic>> dailyTasks() => _request('GET', '/api/daily');
+  Future<Map<String, dynamic>> claimDaily(String id) => _request('POST', '/api/daily/$id/claim');
+  Future<Map<String, dynamic>> dailyTasksAdmin() => _request('GET', '/api/admin/daily');
+  Future<Map<String, dynamic>> createDailyTask(Map<String, dynamic> body) => _request('POST', '/api/admin/daily', body: body);
+
+  // Shop donate extras
+  Future<Map<String, dynamic>> buyBlessing() => _request('POST', '/api/shop/buy-blessing');
+  Future<Map<String, dynamic>> buyLuck(int mult) => _request('POST', '/api/shop/buy-luck', body: {'mult': mult});
+  Future<Map<String, dynamic>> shopBuy(String itemId) => _request('POST', '/api/shop/buy/${Uri.encodeComponent(itemId)}');
 }

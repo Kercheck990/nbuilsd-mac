@@ -67,7 +67,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Продать все?'),
-        content: Text('Продать ${toSell.length} предметов без ⭐ за ${toSell.fold<int>(0, (s, i) => s + i.priceInCoins)} монет?'),
+        content: Text('Продать ${toSell.length} предметов без ⭐ за ${toSell.fold<int>(0, (s, i) => s + i.priceInCoins)} NC?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(l10n.t('cancel'))),
           FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Продать все')),
@@ -77,13 +77,75 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     if (confirmed != true || !mounted) return;
     try {
       final res = await ApiClient.instance.sellAll();
-      ref.read(userProvider.notifier).setBalance(res['balance'] as int? ?? res['balance_coins'] as int? ?? 0);
+      final nc = res['balance_nc'] as int? ?? res['balance'] as int? ?? 0;
+      ref.read(userProvider.notifier).setNc(nc);
       await ref.read(inventoryProvider.notifier).refresh();
       if (!mounted) return;
-      TopNotify.show(context, 'Продано ${res['sold']} за ${res['gained']} монет', success: true);
+      TopNotify.show(context, 'Продано ${res['sold']} за ${res['gained']} NC', success: true);
     } catch (_) {
       if (!mounted) return;
       TopNotify.show(context, l10n.t('error_network'), success: false);
+    }
+  }
+
+  Future<void> _showOptions(NftItem item) async {
+    final l10n = context.l10n;
+    // Проверяем витрину чтобы понять уже повешена или нет
+    bool inShowcase = false;
+    try {
+      final sc = await ApiClient.instance.getShowcase();
+      final list = (sc['showcase'] as List?) ?? const [];
+      inShowcase = list.any((e) => (e as Map)['inventory_id'].toString() == item.id);
+    } catch (_) {}
+    if (!mounted) return;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        margin: const EdgeInsets.all(12),
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        decoration: BoxDecoration(color: Theme.of(ctx).brightness == Brightness.dark ? const Color(0xFF121A14) : Colors.white, borderRadius: BorderRadius.circular(22)),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(leading: const Icon(Icons.sell_outlined), title: Text(l10n.t('inventory_sell')), onTap: () => Navigator.pop(ctx, 'sell')),
+          ListTile(leading: Icon(inShowcase ? Icons.visibility_off_outlined : Icons.visibility_rounded), title: Text(inShowcase ? 'Убрать с профиля' : 'Повесить на профиль'), onTap: () => Navigator.pop(ctx, inShowcase ? 'unshow' : 'show')),
+          ListTile(leading: Icon(item.isStarred ? Icons.star_rounded : Icons.star_border_rounded, color: item.isStarred ? const Color(0xFFFFC107) : null), title: Text(item.isStarred ? 'Снять ⭐' : 'Поставить ⭐'), onTap: () => Navigator.pop(ctx, 'star')),
+          const Divider(height: 8),
+          ListTile(leading: const Icon(Icons.close_rounded), title: Text(l10n.t('cancel')), onTap: () => Navigator.pop(ctx, 'cancel')),
+        ]),
+      ),
+    );
+    if (!mounted || action == null || action == 'cancel') return;
+    if (action == 'sell') {
+      await _sell(item);
+    } else if (action == 'star') {
+      await _toggleStar(item);
+    } else if (action == 'show' || action == 'unshow') {
+      await _toggleShowcase(item, inShowcase);
+    }
+  }
+
+  Future<void> _toggleShowcase(NftItem item, bool wasIn) async {
+    try {
+      final sc = await ApiClient.instance.getShowcase();
+      final list = ((sc['showcase'] as List?) ?? const []).map((e) => (e as Map)['inventory_id'].toString()).toList();
+      List<String> newIds;
+      if (wasIn) {
+        newIds = list.where((id) => id != item.id).toList();
+      } else {
+        if (list.length >= 6) {
+          if (!mounted) return;
+          TopNotify.show(context, 'На профиле максимум 6 NFT', success: false);
+          return;
+        }
+        newIds = [...list, item.id];
+      }
+      await ApiClient.instance.setShowcase(newIds);
+      if (!mounted) return;
+      TopNotify.show(context, wasIn ? 'Убрано с профиля' : 'Повешено на профиль ✅', success: true);
+    } on ApiException catch (e) {
+      if (mounted) TopNotify.show(context, e.message, success: false);
+    } catch (e) {
+      if (mounted) TopNotify.show(context, 'Ошибка: $e', success: false);
     }
   }
 
@@ -117,11 +179,11 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     if (confirmed != true || !mounted) return;
 
     try {
-      final price = await ApiClient.instance.sellItem(item.id);
-      ref.read(userProvider.notifier).setBalance(price);
+      final ncBalance = await ApiClient.instance.sellItem(item.id);
+      ref.read(userProvider.notifier).setNc(ncBalance);
       await ref.read(inventoryProvider.notifier).refresh();
       if (!mounted) return;
-      TopNotify.show(context, l10n.f('inventory_sold', {'price': '${item.priceInCoins}'}), success: true);
+      TopNotify.show(context, 'Продано за ${item.priceInCoins} NC', success: true);
     } on ApiException catch (e) {
       if (!mounted) return;
       final msg = e.code == 'starred' ? 'Снимите ⭐ чтобы продать' : l10n.t('error_network');
@@ -324,7 +386,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                                   width: double.infinity,
                                   showStar: true,
                                   onStarToggle: () => _toggleStar(item),
-                                  onTap: () => _sell(item),
+                                  onTap: () => _showOptions(item),
                                 ),
                               ),
                               const SizedBox(height: 4),
@@ -335,7 +397,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                                     padding: EdgeInsets.zero,
                                     minimumSize: const Size(0, 0),
                                   ),
-                                  onPressed: () => _sell(item),
+                                  onPressed: () => _showOptions(item),
                                   child: Text(
                                     l10n.t('inventory_sell'),
                                     style: TextStyle(

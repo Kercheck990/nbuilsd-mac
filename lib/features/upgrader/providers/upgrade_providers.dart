@@ -214,10 +214,10 @@ class UpgradeSessionNotifier extends StateNotifier<UpgradeSessionState> {
         targetItem: target,
       );
 
-      // Сервер — источник правды: баланс из ответа, инвентарь перечитываем.
-      final balance = (res['balance_coins'] as num?)?.toInt();
-      if (balance != null) {
-        _ref.read(userProvider.notifier).setBalance(balance);
+      // Сервер — источник правды: баланс NC из ответа, инвентарь перечитываем.
+      final balanceNc = (res['balance_nc'] as num?)?.toInt() ?? (res['balance_coins'] as num?)?.toInt();
+      if (balanceNc != null) {
+        _ref.read(userProvider.notifier).setNc(balanceNc);
       }
       _ref.read(dailyStakeProvider.notifier).addStake(state.totalStakeValue);
       await _ref.read(inventoryProvider.notifier).refresh();

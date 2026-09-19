@@ -16,6 +16,7 @@ enum AuthStatus {
   /// Пароль верный, ждём 2FA-код из письма.
   tfaRequired,
   authenticated,
+  banned,
 }
 
 class AuthState {
@@ -65,9 +66,20 @@ class AuthNotifier extends StateNotifier<AuthState> {
     try {
       final user = await _api.me();
       _applyUser(user);
+      final u = _ref.read(userProvider);
+      if (u.isBanned) {
+        state = state.copyWith(status: AuthStatus.banned);
+        return;
+      }
       state = state.copyWith(status: AuthStatus.authenticated);
+    } on ApiException catch (e) {
+      if (e.code == 'banned') {
+        state = state.copyWith(status: AuthStatus.banned);
+        return;
+      }
+      await _api.logout();
+      state = state.copyWith(status: AuthStatus.unauthenticated);
     } catch (_) {
-      // Токен протух или сервер недоступен — просим войти заново.
       await _api.logout();
       state = state.copyWith(status: AuthStatus.unauthenticated);
     }
@@ -207,6 +219,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
         return 'auth_err_email';
       case 'weak_password':
         return 'auth_err_password';
+      case 'banned':
+        return 'banned';
       case 'error_network':
         return 'error_network';
       default:

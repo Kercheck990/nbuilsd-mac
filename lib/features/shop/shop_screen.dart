@@ -10,6 +10,7 @@ import '../../core/widgets/top_notify.dart';
 import '../../data/models/nft_item.dart';
 import '../../data/repositories/inventory_repository.dart';
 import '../../providers/balance_provider.dart';
+import '../../providers/session_provider.dart';
 import '../../services/api_client.dart';
 import '../upgrader/widgets/nft_item_card.dart';
 
@@ -48,8 +49,10 @@ class _ShopScreenState extends ConsumerState<ShopScreen>
   Future<void> _buy(NftItem item) async {
     final l10n = context.l10n;
     final user = ref.read(userProvider);
-    if (user.balanceCoins < item.priceInCoins) {
-      TopNotify.show(context, l10n.f('shop_not_enough', {'v': '${item.priceInCoins - user.balanceCoins}'}), success: false);
+    // Shop — цена в NFC
+    final priceNfc = item.priceInCoins; // 1:1
+    if (user.balanceCoins < priceNfc) {
+      TopNotify.show(context, 'Не хватает ${priceNfc - user.balanceCoins} NFC. Пополните баланс.', success: false);
       return;
     }
     final ok = await showDialog<bool>(
@@ -57,10 +60,7 @@ class _ShopScreenState extends ConsumerState<ShopScreen>
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Text(l10n.f('shop_buy_q', {'name': item.name})),
-        content: Text(l10n.f('shop_buy_text', {
-          'price': '${item.priceInCoins}',
-          'rarity': item.rarity.label,
-        })),
+        content: Text('${priceNfc} NFC · ${item.rarity.label}\nПредмет сразу в инвентаре.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -68,7 +68,7 @@ class _ShopScreenState extends ConsumerState<ShopScreen>
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text(l10n.t('shop_buy')),
+            child: const Text('Купить за NFC'),
           ),
         ],
       ),
@@ -80,16 +80,17 @@ class _ShopScreenState extends ConsumerState<ShopScreen>
       TopNotify.show(context, context.l10n.f('shop_bought', {'name': item.name}), success: true);
     } on ApiException catch (e) {
       if (!mounted) return;
-      TopNotify.show(context, context.l10n.t(e.code == 'insufficient_funds' ? 'shop_fail_funds' : 'shop_fail'), success: false);
+      final msg = e.code == 'insufficient_funds' ? 'Не хватает NFC. Пополните баланс.' : context.l10n.t('shop_fail');
+      TopNotify.show(context, msg, success: false);
     }
   }
 
-  /// Покупка через сервер (источник правды) + синк баланса и инвентаря.
+  /// Покупка за NFC через /api/shop/buy/:id
   Future<Map<String, dynamic>> apiBuy(NftItem item) async {
-    final res = await ApiClient.instance.buyItem(item.id);
-    final balance = (res['balance_coins'] as num?)?.toInt();
-    if (balance != null) {
-      ref.read(userProvider.notifier).setBalance(balance);
+    final res = await ApiClient.instance.shopBuy(item.id);
+    final bal = (res['balance_coins'] as num?)?.toInt() ?? (res['balance_nc'] as num?)?.toInt();
+    if (bal != null) {
+      ref.read(userProvider.notifier).setBalance(bal);
     }
     await ref.read(inventoryProvider.notifier).refresh();
     setState(() => _justBoughtId = item.id);
@@ -98,6 +99,25 @@ class _ShopScreenState extends ConsumerState<ShopScreen>
       if (mounted) setState(() => _justBoughtId = null);
     });
     return res;
+  }
+
+  Future<void> _buyBoost(String type) async {
+    try {
+      Map<String, dynamic> res;
+      if (type == 'blessing') {
+        res = await ApiClient.instance.buyBlessing();
+      } else {
+        res = await ApiClient.instance.buyLuck(type == 'x4' ? 4 : 2);
+      }
+      final bal = (res['balance_coins'] as num?)?.toInt() ?? (res['balance_nc'] as num?)?.toInt();
+      if (bal != null) ref.read(userProvider.notifier).setBalance(bal);
+      ref.read(eventsProvider.notifier).refresh();
+      if (!mounted) return;
+      TopNotify.show(context, 'Куплено! Эффект 15 минут активен.', success: true);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      TopNotify.show(context, e.code == 'insufficient_funds' ? 'Не хватает NFC' : 'Ошибка покупки', success: false);
+    }
   }
 
   @override
@@ -130,100 +150,103 @@ class _ShopScreenState extends ConsumerState<ShopScreen>
                         index: 0,
                         child: BrandCard(
                           highlighted: true,
-                          child: Row(
+                          child: Column(
                             children: [
-                              Container(
-                                width: 84,
-                                height: 84,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(18),
-                                  gradient: RadialGradient(
-                                    colors: [
-                                      green.withOpacity(0.30),
-                                      Colors.transparent
-                                    ],
-                                  ),
-                                ),
-                                alignment: Alignment.center,
-                                child: Text(
-                                  '🛍️',
-                                  style: TextStyle(
-                                    fontSize: 48,
-                                    shadows: [
-                                      Shadow(
-                                          color: green.withOpacity(0.6),
-                                          blurRadius: 16)
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 14),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    PickedBadge(
-                                        text: l10n.t('up_picked')),
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      l10n.t('menu_shop'),
-                                      style: const TextStyle(
-                                          fontSize: 19,
-                                          fontWeight: FontWeight.w800),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      l10n.t('shop_buy_hint'),
-                                      style: TextStyle(
-                                        fontSize: 12.5,
-                                        color: isDark
-                                            ? Colors.white38
-                                            : const Color(0xFF8A94A6),
+                              Row(
+                                children: [
+                                  Container(
+                                    width: 84,
+                                    height: 84,
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(18),
+                                      gradient: RadialGradient(
+                                        colors: [
+                                          green.withOpacity(0.30),
+                                          Colors.transparent
+                                        ],
                                       ),
                                     ),
-                                    const SizedBox(height: 10),
-                                    Row(
+                                    alignment: Alignment.center,
+                                    child: Text(
+                                      '🛍️',
+                                      style: TextStyle(
+                                        fontSize: 48,
+                                        shadows: [
+                                          Shadow(
+                                              color: green.withOpacity(0.6),
+                                              blurRadius: 16)
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 14),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        Icon(Icons.monetization_on,
-                                            size: 16, color: green),
-                                        const SizedBox(width: 4),
-                                        Text(
-                                          '${user.balanceCoins}',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 16,
-                                            color: green,
-                                          ),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                          decoration: BoxDecoration(color: const Color(0xFFFFC107).withOpacity(0.15), borderRadius: BorderRadius.circular(99), border: Border.all(color: const Color(0xFFFFC107).withOpacity(0.5))),
+                                          child: const Text('МАГАЗИН · NFC', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Color(0xFFFFC107))),
                                         ),
-                                        const SizedBox(width: 10),
-                                        GestureDetector(
-                                          onTap: () =>
-                                              context.push('/topup'),
-                                          child: Container(
-                                            padding:
-                                                const EdgeInsets.symmetric(
-                                                    horizontal: 12,
-                                                    vertical: 7),
-                                            decoration: BoxDecoration(
-                                              color: green,
-                                              borderRadius:
-                                                  BorderRadius.circular(99),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          l10n.t('menu_shop'),
+                                          style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'Покупай за NFC',
+                                          style: TextStyle(fontSize: 12.5, color: isDark ? Colors.white38 : const Color(0xFF8A94A6)),
+                                        ),
+                                        const SizedBox(height: 10),
+                                        Row(
+                                          children: [
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                              decoration: BoxDecoration(color: const Color(0xFFFFC107).withOpacity(0.12), borderRadius: BorderRadius.circular(99), border: Border.all(color: const Color(0xFFFFC107).withOpacity(0.5))),
+                                              child: Row(children: [
+                                                const Icon(Icons.stars, size: 14, color: Color(0xFFFFC107)),
+                                                const SizedBox(width: 4),
+                                                Text('${user.balanceCoins} NFC', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: Color(0xFFFFC107))),
+                                              ]),
                                             ),
-                                            child: Text(
-                                              l10n.t('shop_topup'),
-                                              style: const TextStyle(
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.w800,
-                                                color: Colors.black,
+                                            const SizedBox(width: 6),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                              decoration: BoxDecoration(color: Colors.white.withOpacity(0.04), borderRadius: BorderRadius.circular(99), border: Border.all(color: Colors.white12)),
+                                              child: Row(children: [
+                                                const Icon(Icons.monetization_on, size: 14, color: Colors.grey),
+                                                const SizedBox(width: 4),
+                                                Text('${user.balanceNc} NC', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: Colors.grey)),
+                                              ]),
+                                            ),
+                                            const Spacer(),
+                                            GestureDetector(
+                                              onTap: () => context.push('/topup'),
+                                              child: Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                                                decoration: BoxDecoration(color: const Color(0xFFFFC107), borderRadius: BorderRadius.circular(99)),
+                                                child: const Text('Пополнить NFC', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Colors.black)),
                                               ),
                                             ),
-                                          ),
+                                          ],
                                         ),
                                       ],
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 14),
+                              // Бусты за NFC
+                              Row(
+                                children: [
+                                  Expanded(child: _BoostCard(icon: '🛡️', title: 'Благословение', price: '50 NFC', sub: 'Сейв 50% 15м', onTap: () => _buyBoost('blessing'))),
+                                  const SizedBox(width: 8),
+                                  Expanded(child: _BoostCard(icon: '🍀', title: 'x2 Удача', price: '30 NFC', sub: '15 минут', onTap: () => _buyBoost('x2'))),
+                                  const SizedBox(width: 8),
+                                  Expanded(child: _BoostCard(icon: '🍀', title: 'x4 Удача', price: '70 NFC', sub: '15 минут', onTap: () => _buyBoost('x4'))),
+                                ],
                               ),
                             ],
                           ),
@@ -270,16 +293,16 @@ class _ShopScreenState extends ConsumerState<ShopScreen>
                       delegate: SliverChildBuilderDelegate(
                         (context, i) {
                           final item = items[i];
-                          final afford = user.balanceCoins >=
-                              item.priceInCoins;
+                          final priceNfc = item.priceInCoins;
+                          final afford = user.balanceCoins >= priceNfc;
                           return EntranceAnim(
                             index: i % 8,
                             child: _ShopTile(
                               item: item,
                               afford: afford,
-                              justBought:
-                                  _justBoughtId == item.id,
+                              justBought: _justBoughtId == item.id,
                               onBuy: () => _buy(item),
+                              priceLabel: '$priceNfc NFC',
                             ),
                           );
                         },
@@ -348,15 +371,53 @@ class _ShopScreenState extends ConsumerState<ShopScreen>
   }
 }
 
+class _BoostCard extends StatelessWidget {
+  final String icon;
+  final String title;
+  final String price;
+  final String sub;
+  final VoidCallback onTap;
+  const _BoostCard({required this.icon, required this.title, required this.price, required this.sub, required this.onTap});
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF141E1A) : const Color(0xFFF3F6F1),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFFFFC107).withOpacity(0.45)),
+        ),
+        child: Column(children: [
+          Text(icon, style: const TextStyle(fontSize: 22)),
+          const SizedBox(height: 4),
+          Text(title, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800), textAlign: TextAlign.center),
+          Text(sub, style: const TextStyle(fontSize: 9, color: Colors.grey)),
+          const SizedBox(height: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(color: const Color(0xFFFFC107), borderRadius: BorderRadius.circular(99)),
+            child: Text(price, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Colors.black)),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
 class _ShopTile extends StatelessWidget {
   final NftItem item;
   final bool afford;
   final bool justBought;
+  final String priceLabel;
   final VoidCallback onBuy;
   const _ShopTile({
     required this.item,
     required this.afford,
     required this.justBought,
+    required this.priceLabel,
     required this.onBuy,
   });
 
@@ -430,7 +491,7 @@ class _ShopTile extends StatelessWidget {
                     Text(
                       justBought
                           ? context.l10n.t('shop_bought_btn')
-                          : '🪙 ${item.priceInCoins}',
+                          : priceLabel,
                       style: TextStyle(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w800,

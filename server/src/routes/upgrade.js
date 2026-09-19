@@ -2,7 +2,7 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 
 import { config } from '../config.js';
-import { applyBalance, withTransaction } from '../db.js';
+import { applyNcBalance, withTransaction } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 import {
   activeEvents,
@@ -16,6 +16,7 @@ import {
   rollFromSeeds,
   sha256,
 } from '../services/fairness.js';
+import { incDailyProgress } from './daily.js';
 
 export const upgradeRouter = express.Router();
 
@@ -49,15 +50,15 @@ upgradeRouter.post('/', async (req, res, next) => {
     }
 
     const result = await withTransaction(async (client) => {
-      // --- 1. Блокируем пользователя и ставку ------------------------
+      // --- 1. Блокируем пользователя и ставку (ставка в NC) ------------------------
       const userRes = await client.query(
-        `SELECT id, balance_coins, client_seed FROM users WHERE id = $1 FOR UPDATE`,
+        `SELECT id, balance_nc, client_seed, boost_saves_until, boost_x2_until, boost_x4_until FROM users WHERE id = $1 FOR UPDATE`,
         [req.user.id]
       );
       const user = userRes.rows[0];
 
-      if (stakeCoins > user.balance_coins) {
-        return { error: 'insufficient_funds', message: 'Недостаточно монет' };
+      if (stakeCoins > user.balance_nc) {
+        return { error: 'insufficient_funds', message: 'Недостаточно NC' };
       }
 
       let stakeItems = [];
@@ -103,8 +104,16 @@ upgradeRouter.post('/', async (req, res, next) => {
       }
 
       // Ивенты: x2/x4 умножают шанс (потолок 75% нерушим), Сейвы возвращают
-      // ставку при проигрыше.
+      // ставку при проигрыше (глобальные + персональные из Shop NPC).
       const eventsState = await activeEvents();
+      // персональные бусты пользователя (из shop за NPC)
+      const userBoostSaves = user.boost_saves_until && new Date(user.boost_saves_until) > new Date();
+      const userBoostX2 = user.boost_x2_until && new Date(user.boost_x2_until) > new Date();
+      const userBoostX4 = user.boost_x4_until && new Date(user.boost_x4_until) > new Date();
+      // интегрируем в состояние
+      if (userBoostX4) eventsState.events.find((e) => e.key === 'x4').active = true;
+      else if (userBoostX2) eventsState.events.find((e) => e.key === 'x2').active = true;
+      if (userBoostSaves) eventsState.events.find((e) => e.key === 'saves').active = true;
       const mult = luckMultiplier(eventsState);
       const saves = savesActive(eventsState);
 
@@ -123,10 +132,10 @@ upgradeRouter.post('/', async (req, res, next) => {
       const serverSeedHash = sha256(serverSeed);
       const nonce = Date.now();
       const roll = rollFromSeeds(serverSeed, user.client_seed, nonce);
-      const success = roll < chance;
+      const success = roll <= chance + 1e-9; // включительно: попал в зелёный — выиграл
 
-      // --- 4. Списываем ставку (Сейвы: при проигрыше всё возвращается) --
-      const saved = saves && !success;
+      // --- 4. Списываем ставку в NC (Сейвы: 55% шанс спасти при проигрыше — 50-60% как просили, не каждый раз) --
+      const saved = saves && !success && Math.random() < 0.55;
       if (!saved) {
         if (stakeItems.length) {
           await client.query(
@@ -135,9 +144,9 @@ upgradeRouter.post('/', async (req, res, next) => {
           );
         }
       }
-      let balance = user.balance_coins;
+      let balance = user.balance_nc;
       if (stakeCoins > 0 && !saved) {
-        balance = await applyBalance(client, user.id, -stakeCoins, 'upgrade_stake');
+        balance = await applyNcBalance(client, user.id, -stakeCoins, 'upgrade_stake');
       }
 
       // --- 5. Выдаём приз при победе ---------------------------------
@@ -184,7 +193,8 @@ upgradeRouter.post('/', async (req, res, next) => {
         roll_percent: Number(roll.toFixed(3)),
         stake_value: stakeValue,
         profit_coins: profit,
-        balance_coins: balance,
+        balance_nc: balance,
+        balance_coins: null,
         won_inventory_id: wonInventoryId,
         target: { id: target.id, name: target.name, price_coins: target.price_coins },
         fairness: {
@@ -199,6 +209,8 @@ upgradeRouter.post('/', async (req, res, next) => {
     if (result.error) {
       return res.status(400).json(result);
     }
+    // daily progress: upgrade count
+    try { await incDailyProgress(req.user.id, 'upgrade', 1); } catch (_) {}
     res.json(result);
   } catch (err) {
     next(err);

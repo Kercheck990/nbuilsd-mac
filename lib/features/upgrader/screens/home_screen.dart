@@ -59,26 +59,36 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     ref.read(upgradeHistoryProvider.notifier).add(result);
 
     final finalAngle = GaugeIndicator.angleForPercent(result.rollPercent);
-    // Параллельно со звуком крутим стрелку к реальному роллу.
-    if (result.success) {
-      await playSound(ref, ref.read(soundServiceProvider).win);
-    } else if (result.saved == true) {
-      await playSound(ref, ref.read(soundServiceProvider).win);
-    } else {
-      await playSound(ref, ref.read(soundServiceProvider).lose);
-    }
     await _gaugeKey.currentState?.spinTo(finalAngle);
 
     if (!mounted) return;
+    final l10n = context.l10n;
+    // Звук — сразу после остановки стрелки, потом верхнее уведомление Удача/Проигрыш
     if (result.success) {
       _confetti.play();
       HapticFeedback.selectionClick();
+      await playSound(ref, ref.read(soundServiceProvider).win);
+      if (!mounted) return;
+      TopNotify.show(context, l10n.t('up_win_top'), success: true);
     } else if (result.saved == true) {
       HapticFeedback.lightImpact();
-      TopNotify.show(context, context.l10n.t('up_saved_msg'), success: true);
+      await playSound(ref, ref.read(soundServiceProvider).win);
+      if (!mounted) return;
+      TopNotify.show(context, l10n.t('up_saved_msg'), success: true);
     } else {
       HapticFeedback.mediumImpact();
+      await playSound(ref, ref.read(soundServiceProvider).lose);
+      if (!mounted) return;
+      TopNotify.show(context, l10n.t('up_lose_top'), success: false);
     }
+    // Авто-очистка после раунда — как просили: ставка и цель сбрасываются
+    await Future.delayed(const Duration(milliseconds: 900));
+    if (!mounted) return;
+    notifier.resetForNextRound();
+    // Стрелка остаётся 1.5 сек чтобы успел увидеть, потом в стандарт
+    Future.delayed(const Duration(milliseconds: 1500), () {
+      if (mounted) _gaugeKey.currentState?.resetIdle();
+    });
   }
 
   String _upgradeErrorText(BuildContext context, String code) {
@@ -390,6 +400,8 @@ class _StakeCard extends ConsumerWidget {
     final l10n = context.l10n;
     final staked = session.stakedItems;
     final total = session.totalStakeValue;
+    // Показываем фото первого выбранного подарка, а не коробку
+    final firstItem = staked.isNotEmpty ? staked.first : null;
 
     return BrandCard(
       padding: const EdgeInsets.all(18),
@@ -398,6 +410,7 @@ class _StakeCard extends ConsumerWidget {
           _MiniGiftArt(
             emoji: staked.isEmpty ? '🎁' : '📦',
             filled: staked.isNotEmpty,
+            item: firstItem,
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -594,50 +607,29 @@ class _GaugeColumn extends ConsumerWidget {
           ),
         LayoutBuilder(
           builder: (context, constraints) {
-            final w = constraints.maxWidth > 0 ? constraints.maxWidth : MediaQuery.of(context).size.width;
-            // Responsive: phone 220, tablet 250, desktop 280; clamp to avoid overflow
-            final gaugeSize = (w * 0.72).clamp(200.0, 280.0);
-            final boxSize = (gaugeSize + 5).clamp(205.0, 285.0);
-            return SizedBox(
-              width: boxSize,
-              height: boxSize,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  SpinGauge(
+            final mq = MediaQuery.of(context);
+            final isLandscape = mq.orientation == Orientation.landscape;
+            final w = constraints.maxWidth > 0 ? constraints.maxWidth : mq.size.width;
+            final h = mq.size.height;
+            double gaugeSize = (w * 0.64).clamp(210.0, 300.0);
+            if (isLandscape && h < 500) {
+              gaugeSize = (h * 0.60).clamp(160.0, 220.0);
+            }
+            final maxBox = isLandscape ? h * 0.72 : 340.0;
+            final boxSize = (gaugeSize + 8).clamp(165.0, maxBox.clamp(200.0, 310.0));
+            return RepaintBoundary(
+              child: SizedBox(
+                width: boxSize,
+                height: boxSize,
+                child: Center(
+                  child: SpinGauge(
                     key: gaugeKey,
                     idleChancePercent: boosted,
                     showBrandIcon: session.targetItem == null && session.totalStakeValue <= 0,
                     overMaxLimit: session.isOverMaxLimit,
                     size: gaugeSize,
                   ),
-              // Подписи шкалы как на макете: 100% сверху, 50% по бокам.
-              Positioned(
-                top: 6,
-                child: _scaleLabel('100%', isDark),
-              ),
-              Positioned(
-                left: 0,
-                child: _scaleLabel('50%', isDark),
-              ),
-              Positioned(
-                right: 0,
-                child: _scaleLabel('50%', isDark),
-              ),
-              // Центр поверх гейджа: шанс + подпись (гейдж уже рисует
-              // свой текст, поэтому дублируем только «Шанс улучшения»
-              // маленькой строкой снизу центра).
-              Positioned(
-                bottom: 62,
-                child: Text(
-                  l10n.t('up_chance'),
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: isDark ? Colors.white38 : const Color(0xFF8A94A6),
-                  ),
                 ),
-              ),
-                ],
               ),
             );
           },
@@ -802,7 +794,7 @@ class _BalanceStakeRow extends ConsumerWidget {
     final notifier = ref.read(upgradeSessionProvider.notifier);
 
     void setAmount(int v) {
-      final clamped = v.clamp(0, user.balanceCoins);
+      final clamped = v.clamp(0, user.balanceNc);
       notifier.setUseBalance(clamped > 0, amount: clamped);
       if (clamped > 0 && !session.useBalance) {
         notifier.setUseBalance(true, amount: clamped);
@@ -842,7 +834,7 @@ class _BalanceStakeRow extends ConsumerWidget {
           ),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(context.l10n.t('up_stake_coins'),
+            child: Text('Ставить NC',
                 style:
                     const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
           ),
@@ -898,27 +890,26 @@ class _StakeChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final green = isDark ? AppColors.brandNeon : AppColors.brandGreenDeep;
-    // Квадратил — чёткий квадрат 90x90 с иконкой
+    // Уменьшены в разы как просили — компактные карточки
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        width: 92,
-        height: 92,
-        padding: const EdgeInsets.all(6),
+        duration: const Duration(milliseconds: 150),
+        width: 64,
+        height: 64,
+        padding: const EdgeInsets.all(4),
         decoration: BoxDecoration(
-          color: selected ? green.withOpacity(0.16) : (isDark ? const Color(0xFF141E1A) : const Color(0xFFF3F6F1)),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: selected ? green : (isDark ? Colors.white12 : const Color(0xFFE3E8E3)), width: selected ? 1.6 : 1),
-          boxShadow: selected ? [BoxShadow(color: green.withOpacity(0.25), blurRadius: 10)] : null,
+          color: selected ? green.withOpacity(0.14) : (isDark ? const Color(0xFF141E1A) : const Color(0xFFF3F6F1)),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: selected ? green : (isDark ? Colors.white12 : const Color(0xFFE3E8E3)), width: selected ? 1.4 : 1),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            SizedBox(height: 48, child: GiftImage(item: item, radius: 10)),
-            const SizedBox(height: 4),
-            Text(item.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700)),
-            Text('${item.priceInCoins}', style: TextStyle(fontSize: 10, color: green, fontWeight: FontWeight.w800)),
+            SizedBox(height: 34, child: GiftImage(item: item, radius: 8)),
+            const SizedBox(height: 2),
+            Text(item.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 7.5, fontWeight: FontWeight.w700, decoration: TextDecoration.none)),
+            Text('${item.priceInCoins}', style: TextStyle(fontSize: 8, color: green, fontWeight: FontWeight.w800, decoration: TextDecoration.none)),
           ],
         ),
       ),
@@ -982,16 +973,16 @@ class _AllGiftsCard extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: 14),
-          // Вертикальная сетка: идёт вниз (GridView вертикальный), не вбок
+          // Вертикальная сетка: идёт вниз — карточки уменьшены в разы
           SizedBox(
-            height: 360,
+            height: 320,
             child: GridView.builder(
               physics: const BouncingScrollPhysics(),
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: crossCount,
-                mainAxisSpacing: 10,
-                crossAxisSpacing: 10,
-                childAspectRatio: 0.88,
+                crossAxisCount: crossCount == 3 ? 4 : 3,
+                mainAxisSpacing: 6,
+                crossAxisSpacing: 6,
+                childAspectRatio: 0.90,
               ),
               itemCount: catalog.length,
               itemBuilder: (context, i) {
@@ -1033,71 +1024,39 @@ class _TargetTile extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final green = isDark ? AppColors.brandNeon : AppColors.brandGreenDeep;
     final rarity = AppColors.rarityColor(item.rarity.name);
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        width: 108,
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: isDark
-                ? [rarity.withOpacity(0.28), const Color(0xFF131B15)]
-                : [rarity.withOpacity(0.18), Colors.white],
-          ),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: selected ? green : (isDark ? Colors.white12 : const Color(0xFFE3E8E3)),
-            width: selected ? 1.6 : 1,
-          ),
-          boxShadow: selected
-              ? [BoxShadow(color: green.withOpacity(0.3), blurRadius: 16)]
-              : null,
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            SizedBox(
-              height: 52,
-              child: GiftImage(item: item, radius: 10),
+    return RepaintBoundary(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: isDark ? [rarity.withOpacity(0.22), const Color(0xFF131B15)] : [rarity.withOpacity(0.14), Colors.white],
             ),
-            const SizedBox(height: 4),
-            Text(
-              item.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w700,
-                color: isDark ? Colors.white : const Color(0xFF101410),
-              ),
-            ),
-            const SizedBox(height: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(isDark ? 0.45 : 0.06),
-                borderRadius: BorderRadius.circular(99),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.keyboard_double_arrow_up_rounded, size: 13, color: green),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: selected ? green : (isDark ? Colors.white12 : const Color(0xFFE3E8E3)), width: selected ? 1.2 : 1),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(height: 38, child: GiftImage(item: item, radius: 8)),
+              const SizedBox(height: 3),
+              Text(item.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 8, fontWeight: FontWeight.w700, color: isDark ? Colors.white : const Color(0xFF101410), decoration: TextDecoration.none)),
+              const SizedBox(height: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(color: Colors.black.withOpacity(isDark ? 0.35 : 0.06), borderRadius: BorderRadius.circular(99)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.keyboard_double_arrow_up_rounded, size: 10, color: green),
                   const SizedBox(width: 2),
-                  Text(
-                    showChance ? '${chance.toStringAsFixed(2)}%' : '${item.priceInCoins}',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      color: isDark ? Colors.white : const Color(0xFF101410),
-                    ),
-                  ),
-                ],
+                  Text(showChance ? '${chance.toStringAsFixed(1)}%' : '${item.priceInCoins}', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: isDark ? Colors.white : const Color(0xFF101410), decoration: TextDecoration.none)),
+                ]),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

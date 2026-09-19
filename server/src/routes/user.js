@@ -1,6 +1,6 @@
 import express from 'express';
 import { config } from '../config.js';
-import { applyBalance, query, withTransaction } from '../db.js';
+import { applyBalance, applyNcBalance, query, withTransaction } from '../db.js';
 import { publicUser, requireAuth } from '../middleware/auth.js';
 
 export const userRouter = express.Router();
@@ -53,7 +53,7 @@ userRouter.post('/inventory/:id/star', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-/// POST /api/inventory/sell-all — продать все незазвёздоченные
+/// POST /api/inventory/sell-all — продать все незазвёздоченные (выплата в NC)
 userRouter.post('/inventory/sell-all', async (req, res, next) => {
   try {
     const result = await withTransaction(async (client) => {
@@ -64,21 +64,21 @@ userRouter.post('/inventory/sell-all', async (req, res, next) => {
           FOR UPDATE OF inv`,
         [req.user.id]
       );
-      if (!rows.length) return { sold:0, gained:0, balance: req.user.balance_coins };
+      if (!rows.length) return { sold:0, gained:0, balance: req.user.balance_nc, balance_nc: req.user.balance_nc };
       let total=0;
       for (const r of rows) {
         const price=Math.floor(r.price_coins*config.game.sellRatio);
         await client.query(`UPDATE inventory SET status='sold' WHERE id=$1`,[r.id]);
         total+=price;
       }
-      const balance=await applyBalance(client, req.user.id, total, 'sell_all', `sell_all:${rows.length}`);
-      return { sold: rows.length, gained: total, balance };
+      const balance=await applyNcBalance(client, req.user.id, total, 'sell_all', `sell_all:${rows.length}`);
+      return { sold: rows.length, gained: total, balance, balance_nc: balance, balance_coins: req.user.balance_coins };
     });
     res.json(result);
   } catch (err){ next(err); }
 });
 
-/// POST /api/inventory/:id/sell — продать предмет за монеты.
+/// POST /api/inventory/:id/sell — продать предмет за NC.
 userRouter.post('/inventory/:id/sell', async (req, res, next) => {
   try {
     const result = await withTransaction(async (client) => {
@@ -97,7 +97,7 @@ userRouter.post('/inventory/:id/sell', async (req, res, next) => {
       await client.query(`UPDATE inventory SET status = 'sold' WHERE id = $1`, [
         rows[0].id,
       ]);
-      const balance = await applyBalance(
+      const balance = await applyNcBalance(
         client,
         req.user.id,
         price,
@@ -113,7 +113,7 @@ userRouter.post('/inventory/:id/sell', async (req, res, next) => {
     if (result.starred) {
       return res.status(400).json({ error: 'starred', message: 'Предмет помечен ⭐ — снимите звёздочку' });
     }
-    res.json({ sold_for: result.price, balance_coins: result.balance });
+    res.json({ sold_for: result.price, balance_nc: result.balance, balance_coins: req.user.balance_coins });
   } catch (err) {
     next(err);
   }
@@ -153,6 +153,10 @@ userRouter.post('/heartbeat', async (req, res, next) => {
         RETURNING playtime_seconds`,
       [req.user.id]
     );
+    try {
+      const { incDailyProgress } = await import('./daily.js');
+      await incDailyProgress(req.user.id, 'login', 1);
+    } catch (_) {}
     res.json({ ok: true, playtime_seconds: Number(rows[0].playtime_seconds) });
   } catch (err) {
     next(err);
@@ -187,21 +191,47 @@ userRouter.get('/settings', async (req, res, next) => {
   }
 });
 
-/// GET /api/events — активные ивенты (x2/x4/Сейвы) + окна выходных.
+/// GET /api/events — активные ивенты (x2/x4/Сейвы) + окна выходных + персональные бусты из Shop.
 userRouter.get('/events', async (req, res, next) => {
   try {
     const { activeEvents } = await import('../services/events.js');
-    res.json(await activeEvents());
+    const base = await activeEvents();
+    // персональные бусты 15 мин из магазина (boost_*_until)
+    try {
+      const { rows } = await query(`SELECT boost_saves_until, boost_x2_until, boost_x4_until FROM users WHERE id=$1`, [req.user.id]);
+      if (rows.length) {
+        const now = new Date();
+        const personal = [];
+        if (rows[0].boost_saves_until && new Date(rows[0].boost_saves_until) > now) personal.push({ key: 'saves', until: rows[0].boost_saves_until });
+        if (rows[0].boost_x2_until && new Date(rows[0].boost_x2_until) > now) personal.push({ key: 'x2', until: rows[0].boost_x2_until });
+        if (rows[0].boost_x4_until && new Date(rows[0].boost_x4_until) > now) personal.push({ key: 'x4', until: rows[0].boost_x4_until });
+        for (const p of personal) {
+          const existing = base.events.find((e) => e.key === p.key);
+          if (existing) {
+            existing.active = true;
+            existing.ends_at = p.until;
+            existing.personal = true;
+          }
+        }
+      }
+    } catch (_) {}
+    res.json(base);
   } catch (err) {
     next(err);
   }
 });
 
-/// PUT /api/me — смена ника/языка игроком.
+/// PUT /api/me — смена ника/языка/аватарки игроком.
 userRouter.put('/me', async (req, res, next) => {
   try {
     const nickname = req.body.nickname != null ? String(req.body.nickname).trim() : null;
     const locale = ['ru', 'uk', 'en'].includes(req.body.locale) ? req.body.locale : null;
+    let avatarUrl = undefined;
+    if (req.body.avatar_url !== undefined) {
+      const raw = String(req.body.avatar_url).trim();
+      if (raw === '' || raw.toLowerCase() === 'null') avatarUrl = null; // очистить
+      else avatarUrl = raw.slice(0, 300);
+    }
     if (nickname != null && (nickname.length < 3 || nickname.length > 20)) {
       return res.status(400).json({ error: 'invalid_nickname', message: 'Ник: 3–20 символов' });
     }
@@ -214,21 +244,85 @@ userRouter.put('/me', async (req, res, next) => {
         return res.status(409).json({ error: 'nickname_taken', message: 'Ник занят' });
       }
     }
+    if (avatarUrl !== undefined && avatarUrl !== null && avatarUrl.length > 0 && !avatarUrl.startsWith('assets/avatar/') && !avatarUrl.startsWith('assets/') && !avatarUrl.startsWith('http')) {
+      return res.status(400).json({ error: 'bad_avatar', message: 'Недопустимый аватар' });
+    }
+    // avatarUrl: undefined = не менять, null = очистить, string = установить
+    const avatarParam = avatarUrl === undefined ? null : avatarUrl;
+    const avatarSet = avatarUrl === undefined ? 'avatar_url' : avatarUrl === null ? 'NULL' : '$4';
      const { rows } = await query(
       `UPDATE users
           SET nickname = COALESCE($2, nickname),
-              locale = COALESCE($3, locale)
+              locale = COALESCE($3, locale),
+              avatar_url = ${avatarUrl === undefined ? 'avatar_url' : avatarUrl === null ? 'NULL' : '$4'}
         WHERE id = $1
         RETURNING id, email, nickname, avatar_url, locale, balance_coins, balance_nc,
                   email_verified, is_admin, badges, telegram_id, telegram_username,
                   tfa_enabled, playtime_seconds`,
-      [req.user.id, nickname, locale]
+      avatarUrl === undefined || avatarUrl === null ? [req.user.id, nickname, locale] : [req.user.id, nickname, locale, avatarUrl]
     );
     const { publicUser } = await import('../middleware/auth.js');
     res.json({ user: publicUser(rows[0]) });
   } catch (err) {
     next(err);
   }
+});
+
+// --- Showcase: повесить NFT из инвентаря на профиль (до 6) ---
+userRouter.get('/showcase', requireAuth, async (req, res, next) => {
+  try {
+    const { rows } = await query(
+      `SELECT inv.id as inventory_id, it.id as item_id, it.name, it.price_coins, it.rarity, it.image_asset, it.image_url
+         FROM user_showcase sc
+         JOIN inventory inv ON inv.id = sc.inventory_id AND inv.status='open' AND inv.user_id = $1
+         JOIN items it ON it.id = inv.item_id
+        WHERE sc.user_id = $1
+        ORDER BY sc.position ASC
+        LIMIT 6`,
+      [req.user.id]
+    );
+    res.json({ showcase: rows.map(r => ({ ...r, image_asset: r.image_asset ? `assets/gifts/${r.image_asset}` : null })) });
+  } catch (err) { next(err); }
+});
+
+userRouter.post('/showcase', requireAuth, async (req, res, next) => {
+  try {
+    const ids = Array.isArray(req.body.inventory_ids) ? req.body.inventory_ids.map(String).slice(0, 6) : [];
+    // проверяем что все id принадлежат пользователю и открыты
+    if (ids.length) {
+      const { rows } = await query(`SELECT id FROM inventory WHERE id = ANY($1::uuid[]) AND user_id = $2 AND status='open'`, [ids, req.user.id]);
+      if (rows.length !== ids.length) return res.status(400).json({ error: 'bad_inventory', message: 'Часть предметов недоступна' });
+    }
+    await query(`DELETE FROM user_showcase WHERE user_id = $1`, [req.user.id]);
+    for (let i = 0; i < ids.length; i++) {
+      await query(`INSERT INTO user_showcase (user_id, inventory_id, position) VALUES ($1,$2,$3)`, [req.user.id, ids[i], i]);
+    }
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// GET /api/obtained — все item_id когда-либо полученные пользователем (для индекса, остаётся даже если продал)
+userRouter.get('/obtained', requireAuth, async (req, res, next) => {
+  try {
+    const { rows } = await query(
+      `SELECT DISTINCT it.id as item_id FROM inventory inv JOIN items it ON it.id = inv.item_id WHERE inv.user_id = $1
+       UNION
+       SELECT DISTINCT item_id FROM case_openings WHERE user_id = $1
+       UNION
+       SELECT DISTINCT target_item_id as item_id FROM rounds WHERE user_id = $1
+       UNION
+       SELECT DISTINCT unnest(offer_ids)::text as item_id FROM trades WHERE from_user = $1
+       UNION
+       SELECT DISTINCT unnest(ask_ids)::text as item_id FROM trades WHERE to_user = $1`,
+      [req.user.id]
+    );
+    // Для trades offer/ask хранятся inventory.id, а не item_id — пробуем также через inventory
+    // Дополнительно берём все item_id из инвентаря (включая проданные/потраченные)
+    const { rows: invAll } = await query(`SELECT DISTINCT item_id FROM inventory WHERE user_id = $1`, [req.user.id]);
+    const set = new Set([...rows.map(r => r.item_id), ...invAll.map(r => r.item_id)]);
+    // Также добавим все item_id из showcase
+    res.json({ obtained: Array.from(set) });
+  } catch (err) { next(err); }
 });
 
 /// GET /api/users/search?q= — поиск игроков (для трейдов/профилей).
@@ -270,12 +364,13 @@ userRouter.get('/users/:nickname', async (req, res, next) => {
       [u.id]
     );
     const invRes = await query(
-      `SELECT inv.id, it.id AS item_id, it.name, it.price_coins, it.rarity,
+      `SELECT inv.id as inventory_id, it.id AS item_id, it.name, it.price_coins, it.rarity,
               it.collection, it.image_asset, it.image_url
-         FROM inventory inv
+         FROM user_showcase sc
+         JOIN inventory inv ON inv.id = sc.inventory_id AND inv.status='open' AND inv.user_id = sc.user_id
          JOIN items it ON it.id = inv.item_id
-        WHERE inv.user_id = $1 AND inv.status = 'open'
-        ORDER BY it.price_coins DESC
+        WHERE sc.user_id = $1
+        ORDER BY sc.position ASC
         LIMIT 6`,
       [u.id]
     );
@@ -288,8 +383,14 @@ userRouter.get('/users/:nickname', async (req, res, next) => {
         created_at: u.created_at,
         stats: statsRes.rows[0],
         showcase: invRes.rows.map((r) => ({
-          ...r,
+          id: r.inventory_id,
+          item_id: r.item_id,
+          name: r.name,
+          price_coins: r.price_coins,
+          rarity: r.rarity,
+          collection: r.collection,
           image_asset: r.image_asset ? `assets/gifts/${r.image_asset}` : null,
+          image_url: r.image_url,
         })),
       },
     });
