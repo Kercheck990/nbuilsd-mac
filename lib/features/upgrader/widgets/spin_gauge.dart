@@ -43,13 +43,15 @@ class SpinGaugeState extends State<SpinGauge> with SingleTickerProviderStateMixi
 
   /// Runs the spin: [finalAngleDeg] is the resting angle that matches the
   /// server-provided outcome.
+  /// After first spin returns to standard position and does 2-5 full rotations.
   Future<void> spinTo(double finalAngleDeg) async {
     final rand = Random();
     final rotations = AppConstants.spinFullRotationsMin +
         rand.nextInt(
             AppConstants.spinFullRotationsMax - AppConstants.spinFullRotationsMin + 1);
 
-    final startAngle = _currentAngle ?? AppConstants.gaugeStartAngleDeg;
+    // Always start from standard position per request
+    final startAngle = AppConstants.gaugeStartAngleDeg;
     // Overshoot a few degrees past the final resting point, then settle back.
     final overshoot = 4.0 + rand.nextDouble() * 2;
     final totalSweep = 360.0 * rotations + (finalAngleDeg - startAngle);

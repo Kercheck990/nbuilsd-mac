@@ -155,28 +155,33 @@ class GiftImage extends StatelessWidget {
       child = Image.asset(
         asset,
         fit: BoxFit.contain,
+        filterQuality: FilterQuality.medium,
+        // Ограничиваем декодирование для ПК — меньше лагов
+        cacheWidth: 256,
         errorBuilder: (_, __, ___) => _fallback(url),
       );
     } else {
       child = _fallback(url);
     }
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(radius),
-      child: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              AppColors.rarityColor(item.rarity.name).withOpacity(0.22),
-              AppColors.darkSurfaceAlt,
-            ],
+    return RepaintBoundary(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(radius),
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                AppColors.rarityColor(item.rarity.name).withOpacity(0.18),
+                AppColors.darkSurfaceAlt,
+              ],
+            ),
           ),
+          alignment: Alignment.center,
+          padding: const EdgeInsets.all(4),
+          child: child,
         ),
-        alignment: Alignment.center,
-        padding: const EdgeInsets.all(4),
-        child: child,
       ),
     );
   }
@@ -195,35 +200,12 @@ class GiftImage extends StatelessWidget {
   }
 }
 
-class _ShimmerBox extends StatefulWidget {
+class _ShimmerBox extends StatelessWidget {
   const _ShimmerBox();
   @override
-  State<_ShimmerBox> createState() => _ShimmerBoxState();
-}
-
-class _ShimmerBoxState extends State<_ShimmerBox> with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1200),
-  )..repeat();
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, _) {
-        return Opacity(
-          opacity: 0.3 + 0.3 * (0.5 + 0.5 * (_controller.value * 2 - 1).abs()),
-          child: Container(color: Colors.white.withOpacity(0.05)),
-        );
-      },
-    );
+    // Статичная заглушка — убран AnimatedBuilder для производительности на ПК
+    return Container(color: Colors.white.withOpacity(0.06));
   }
 }
 

@@ -74,7 +74,7 @@ class _EventBadge extends StatelessWidget {
         children: [
           Image.asset(asset, width: 24, height: 24, fit: BoxFit.contain, errorBuilder: (_, __, ___) => Text(eventKey == 'x4' ? '🍀' : eventKey == 'x2' ? '🍀' : '🛡️', style: const TextStyle(fontSize: 15))),
           const SizedBox(width: 6),
-          Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: green)),
+          Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: green, decoration: TextDecoration.none)),
           if (endsAt != null) ...[
             const SizedBox(width: 6),
             _Countdown(endsAt: endsAt!),
@@ -103,7 +103,149 @@ class _Countdown extends StatelessWidget {
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
                 color: Colors.grey,
+                decoration: TextDecoration.none,
                 fontFeatures: [FontFeature.tabularFigures()]));
+      },
+    );
+  }
+}
+
+/// Таймер до админ-абьюза (фото-прикреп: «до админ абьюза — и времени ...»)
+/// Показывает «Админ абьюз через 23ч 59м 59с» до пятницы 15:00 / субботы 15:00 UTC,
+/// во время абьюза — белый флэш + иконки блес + х2 на 15 минут.
+class AdminAbuseCountdown extends ConsumerWidget {
+  const AdminAbuseCountdown({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ev = ref.watch(eventsProvider);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // Если абьюз сейчас — не показываем countdown, показываем overlay отдельно
+    if (ev.adminAbuse) return const SizedBox.shrink();
+    final next = ev.nextAdminAbuseAt;
+    if (next == null) return const SizedBox.shrink();
+    return StreamBuilder(
+      stream: Stream.periodic(const Duration(seconds: 1)),
+      builder: (_, __) {
+        final left = next.difference(DateTime.now().toUtc());
+        if (left.isNegative) return const SizedBox.shrink();
+        final h = left.inHours;
+        final m = left.inMinutes % 60;
+        final s = left.inSeconds % 60;
+        final txt = 'Админ абьюз через ${h}ч, ${m}м ${s}с';
+        return RepaintBoundary(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF0F1712).withOpacity(0.92) : Colors.white.withOpacity(0.95),
+              borderRadius: BorderRadius.circular(99),
+              border: Border.all(color: AppColors.brandNeon.withOpacity(0.5)),
+              // убрана жёлтая полоска под текстом — теперь без underline, только зелёная рамка
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.bolt_rounded, size: 16, color: AppColors.brandNeon),
+              const SizedBox(width: 6),
+              Text(txt, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: isDark ? Colors.white : const Color(0xFF101410), decoration: TextDecoration.none)),
+            ]),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Белый флэш + блес/х2 на 15 минут во время абьюза (пятница/суббота 15:00 UTC)
+class AdminAbuseOverlay extends ConsumerStatefulWidget {
+  const AdminAbuseOverlay({super.key});
+  @override
+  ConsumerState<AdminAbuseOverlay> createState() => _AdminAbuseOverlayState();
+}
+
+class _AdminAbuseOverlayState extends ConsumerState<AdminAbuseOverlay> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 1200));
+  bool _wasAbuse = false;
+  bool _showFlash = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _c.addStatusListener((s) {
+      if (s == AnimationStatus.completed) {
+        Future.delayed(const Duration(milliseconds: 600), () {
+          if (mounted) setState(() => _showFlash = false);
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ev = ref.watch(eventsProvider);
+    final isAbuse = ev.adminAbuse;
+    if (isAbuse && !_wasAbuse) {
+      _wasAbuse = true;
+      _showFlash = true;
+      _c.forward(from: 0);
+    } else if (!isAbuse && _wasAbuse) {
+      _wasAbuse = false;
+    }
+    if (!isAbuse && !_showFlash) return const SizedBox.shrink();
+    final endsAt = ev.adminAbuseEndsAt;
+    return Stack(
+      children: [
+        if (_showFlash)
+          FadeTransition(
+            opacity: Tween(begin: 1.0, end: 0.0).animate(CurvedAnimation(parent: _c, curve: Curves.easeOut)),
+            child: Container(color: Colors.white.withOpacity(0.92)),
+          ),
+        if (isAbuse)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.96),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: AppColors.brandNeon.withOpacity(0.6)),
+                    boxShadow: [BoxShadow(color: AppColors.brandNeon.withOpacity(0.25), blurRadius: 20)],
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Image.asset('assets/abuse/blesing.png', width: 36, height: 36, errorBuilder: (_, __, ___) => const Text('🛡️', style: TextStyle(fontSize: 28))),
+                    const SizedBox(width: 8),
+                    Image.asset('assets/abuse/x2luck.png', width: 36, height: 36, errorBuilder: (_, __, ___) => const Text('🍀', style: TextStyle(fontSize: 28))),
+                    const SizedBox(width: 12),
+                    Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                      const Text('АДМИН АБЬЮЗ!', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: AppColors.brandGreenDeep, decoration: TextDecoration.none)),
+                      if (endsAt != null) _AbuseCountdown(endsAt: endsAt),
+                    ]),
+                  ]),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _AbuseCountdown extends StatelessWidget {
+  final DateTime endsAt;
+  const _AbuseCountdown({required this.endsAt});
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder(
+      stream: Stream.periodic(const Duration(seconds: 1)),
+      builder: (_, __) {
+        final left = endsAt.difference(DateTime.now().toUtc());
+        final txt = left.isNegative ? '0:00' : '${left.inMinutes}:${(left.inSeconds % 60).toString().padLeft(2, '0')}';
+        return Text('до конца $txt', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.grey[600], decoration: TextDecoration.none));
       },
     );
   }

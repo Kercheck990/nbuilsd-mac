@@ -5,28 +5,38 @@ import 'package:go_router/go_router.dart';
 import '../l10n/app_localizations.dart';
 import '../theme/app_colors.dart';
 import '../../providers/balance_provider.dart';
+import '../../providers/notifications_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../features/auth/providers/auth_provider.dart';
 import '../../main.dart';
 
-/// Общий фон всех экранов: градиент + мягкие зелёные пятна.
-/// Светлая тема — почти белый с едва заметной зеленью,
-/// тёмная — глубокий зелено-чёрный с неоновыми диагональными лучами.
-class BrandBackground extends StatelessWidget {
+/// Общий фон всех экранов: градиент + мягкие пятна.
+/// Подстраивается под тёмную / оранжевую / синюю / светлую темы.
+class BrandBackground extends ConsumerWidget {
   final Widget child;
   const BrandBackground({super.key, required this.child});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final appTheme = ref.watch(appThemeProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final colors = switch (appTheme) {
+      AppThemeId.darkOrange => const [AppColors.darkOrangeBgTop, AppColors.darkOrangeBgBottom],
+      AppThemeId.darkBlue => const [AppColors.darkBlueBgTop, AppColors.darkBlueBgBottom],
+      AppThemeId.light => const [AppColors.lightBgTop, AppColors.lightBgBottom],
+      _ => isDark ? const [AppColors.darkBgTop, AppColors.darkBgBottom] : const [AppColors.lightBgTop, AppColors.lightBgBottom],
+    };
+    final glowColor = switch (appTheme) {
+      AppThemeId.darkOrange => AppColors.darkOrangeAccent,
+      AppThemeId.darkBlue => AppColors.darkBlueAccent,
+      _ => const Color(0xFF2BE34A),
+    };
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: isDark
-              ? const [AppColors.darkBgTop, AppColors.darkBgBottom]
-              : const [AppColors.lightBgTop, AppColors.lightBgBottom],
+          colors: colors,
         ),
       ),
       child: Stack(
@@ -35,7 +45,7 @@ class BrandBackground extends StatelessWidget {
           Positioned.fill(
             child: IgnorePointer(
               child: CustomPaint(
-                painter: _GlowPainter(isDark: isDark),
+                painter: _GlowPainter(isDark: isDark, glowColor: glowColor, appTheme: appTheme),
               ),
             ),
           ),
@@ -48,48 +58,27 @@ class BrandBackground extends StatelessWidget {
 
 class _GlowPainter extends CustomPainter {
   final bool isDark;
-  _GlowPainter({required this.isDark});
+  final Color glowColor;
+  final AppThemeId appTheme;
+  _GlowPainter({required this.isDark, required this.glowColor, required this.appTheme});
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (isDark) {
-      // Диагональный неоновый луч справа (как на тёмных макетах).
-      final beam = Paint()
-        ..shader = const LinearGradient(
-          colors: [Color(0x002BE34A), Color(0x332BE34A)],
-        ).createShader(Rect.fromLTWH(size.width * 0.55, 0, size.width * 0.45, size.height))
-        ..style = PaintingStyle.fill;
-      canvas.save();
-      canvas.translate(size.width * 0.85, size.height * 0.1);
-      canvas.rotate(0.5);
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(const Rect.fromLTWH(-40, -200, 90, 900), const Radius.circular(60)),
-        beam,
-      );
-      canvas.restore();
-
-      final soft = Paint()..color = const Color(0x142BE34A);
-      canvas.drawCircle(Offset(size.width * 0.12, size.height * 0.08), 110, soft);
-      canvas.drawCircle(Offset(size.width * 0.9, size.height * 0.9), 140, soft);
-    } else {
-      final soft = Paint()..color = const Color(0x143EDB5A);
-      canvas.drawCircle(Offset(size.width * 0.08, size.height * 0.12), 90, soft);
-      canvas.drawCircle(Offset(size.width * 0.85, size.height * 0.05), 120, soft);
-      // Едва заметная диагональ сверху справа.
-      final beam = Paint()..color = const Color(0x0A3EDB5A);
-      canvas.save();
-      canvas.translate(size.width * 0.9, 0);
-      canvas.rotate(0.5);
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(const Rect.fromLTWH(-30, -160, 70, 700), const Radius.circular(50)),
-        beam,
-      );
-      canvas.restore();
+    // Упрощено для производительности на ПК: только 2 мягких круга без луча и shader
+    // (луч с LinearGradient и rotate вызывал лаги на 1920x1080)
+    if (!isDark) {
+      final soft = Paint()..color = const Color(0x103EDB5A);
+      canvas.drawCircle(Offset(size.width * 0.08, size.height * 0.12), 80, soft);
+      canvas.drawCircle(Offset(size.width * 0.85, size.height * 0.05), 100, soft);
+      return;
     }
+    final soft = Paint()..color = glowColor.withOpacity(0.09);
+    canvas.drawCircle(Offset(size.width * 0.12, size.height * 0.08), 95, soft);
+    canvas.drawCircle(Offset(size.width * 0.90, size.height * 0.92), 110, soft);
   }
 
   @override
-  bool shouldRepaint(covariant _GlowPainter old) => old.isDark != isDark;
+  bool shouldRepaint(covariant _GlowPainter old) => old.isDark != isDark || old.glowColor != glowColor || old.appTheme != appTheme;
 }
 
 /// Заголовок экрана 1в1 с макетов:
@@ -175,6 +164,8 @@ class ScreenHeader extends StatelessWidget {
           const _FullscreenBtn(),
           const SizedBox(width: 6),
           const _InventoryBtn(),
+          const SizedBox(width: 6),
+          const NotificationBell(),
           const SizedBox(width: 8),
           const UserPill(),
         ],
@@ -296,6 +287,150 @@ class _InventoryBtn extends StatelessWidget {
   }
 }
 
+/// Колокольчик уведомлений под ID: при нажатии открывается меню с уведомлениями, можно выйти.
+class NotificationBell extends ConsumerStatefulWidget {
+  const NotificationBell({super.key});
+  @override
+  ConsumerState<NotificationBell> createState() => _NotificationBellState();
+}
+
+class _NotificationBellState extends ConsumerState<NotificationBell> {
+  @override
+  void initState() {
+    super.initState();
+    Future.microtask(() => ref.read(notificationsProvider.notifier).refresh());
+    // авто-обновление каждые 20 сек
+    Future.delayed(const Duration(seconds: 20), _loop);
+  }
+
+  void _loop() {
+    if (!mounted) return;
+    ref.read(notificationsProvider.notifier).refresh();
+    Future.delayed(const Duration(seconds: 20), _loop);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.watch(notificationsProvider);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final unread = ref.watch(notificationsProvider.notifier).unread;
+    return _PressScale(
+      onTap: () => _showNotifications(context, ref, isDark),
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: isDark ? Colors.white.withOpacity(0.06) : Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: isDark ? Colors.white.withOpacity(0.1) : const Color(0x14000000)),
+        ),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Icon(Icons.notifications_none_rounded, size: 19, color: isDark ? AppColors.brandNeon : AppColors.brandGreenDeep),
+            if (unread > 0)
+              Positioned(
+                right: 6,
+                top: 6,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                  decoration: BoxDecoration(color: AppColors.danger, borderRadius: BorderRadius.circular(99)),
+                  child: Text(unread > 99 ? '99+' : '$unread', style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.white)),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showNotifications(BuildContext context, WidgetRef ref, bool isDark) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        maxChildSize: 0.9,
+        minChildSize: 0.4,
+        expand: false,
+        builder: (_, ctrl) => Container(
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF121A14) : Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+          ),
+          child: Consumer(
+            builder: (c, ref2, _) {
+              final async = ref2.watch(notificationsProvider);
+              return Column(
+                children: [
+                  const SizedBox(height: 10),
+                  Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.withOpacity(0.3), borderRadius: BorderRadius.circular(99))),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                    child: Row(
+                      children: [
+                        const Text('Уведомления', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                        const Spacer(),
+                        TextButton(onPressed: () => ref2.read(notificationsProvider.notifier).markAllRead(), child: const Text('Прочитать все')),
+                        IconButton(icon: const Icon(Icons.close_rounded, size: 18), onPressed: () => Navigator.pop(ctx)),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  Expanded(
+                    child: async.when(
+                      loading: () => const Center(child: CircularProgressIndicator()),
+                      error: (e, _) => Center(child: Text('Ошибка: $e')),
+                      data: (list) {
+                        if (list.isEmpty) return const Center(child: Text('Пока нет уведомлений', style: TextStyle(color: Colors.grey)));
+                        return ListView.separated(
+                          controller: ctrl,
+                          itemCount: list.length,
+                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          itemBuilder: (_, i) {
+                            final n = list[i];
+                            final icon = switch (n.type) {
+                              'role' => '🎭',
+                              'ticket' => '🎫',
+                              'update' => '📢',
+                              'balance' => '💰',
+                              'trade' => n.title.contains('принял') ? '🤝' : '❌',
+                              'leader' => '🏆',
+                              'daily' => '📅',
+                              _ => '🔔',
+                            };
+                            return ListTile(
+                              leading: Text(icon, style: const TextStyle(fontSize: 22)),
+                              title: Text(n.title, style: TextStyle(fontSize: 13, fontWeight: n.isRead ? FontWeight.w500 : FontWeight.w800)),
+                              subtitle: Text(n.body, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                              trailing: n.isRead ? null : IconButton(icon: const Icon(Icons.done_rounded, size: 16), onPressed: () => ref2.read(notificationsProvider.notifier).markRead(n.id)),
+                              onTap: () => ref2.read(notificationsProvider.notifier).markRead(n.id),
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                  SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton(onPressed: () => Navigator.pop(ctx), child: const Text('Выйти')),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Пилюля пользователя справа вверху: аватар + ник + ID + стрелка.
 /// Тап — меню: профиль / тема / выйти.
 class UserPill extends ConsumerWidget {
@@ -331,21 +466,28 @@ class UserPill extends ConsumerWidget {
           children: [
             Stack(
               children: [
-                CircleAvatar(
-                  radius: 14,
-                  backgroundColor: isDark ? const Color(0xFF1C2A20) : const Color(0xFFE8F5E9),
-                  backgroundImage: user.avatarUrl != null ? NetworkImage(user.avatarUrl!) : null,
-                  child: user.avatarUrl == null
-                      ? Text(
-                          nick.characters.first.toUpperCase(),
-                          style: TextStyle(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 13,
-                            color: isDark ? AppColors.brandNeon : AppColors.brandGreenDeep,
-                          ),
-                        )
-                      : null,
-                ),
+                Builder(builder: (_) {
+                  ImageProvider? avatarImage;
+                  if (user.avatarUrl != null && user.avatarUrl!.isNotEmpty) {
+                    final url = user.avatarUrl!;
+                    avatarImage = url.startsWith('assets/') ? AssetImage(url) as ImageProvider : NetworkImage(url) as ImageProvider;
+                  }
+                  return CircleAvatar(
+                    radius: 14,
+                    backgroundColor: isDark ? const Color(0xFF1C2A20) : const Color(0xFFE8F5E9),
+                    backgroundImage: avatarImage,
+                    child: avatarImage == null
+                        ? Text(
+                            nick.characters.first.toUpperCase(),
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 13,
+                              color: isDark ? AppColors.brandNeon : AppColors.brandGreenDeep,
+                            ),
+                          )
+                        : null,
+                  );
+                }),
                 Positioned(
                   right: 0,
                   bottom: 0,
@@ -401,31 +543,38 @@ class UserPill extends ConsumerWidget {
   void _showUserMenu(BuildContext context, WidgetRef ref, bool isDark) {
     final themeMode = ref.read(themeModeProvider);
     final l10n = AppLocalizations.of(context);
+    final currentLoc = GoRouterState.of(context).matchedLocation;
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        margin: const EdgeInsets.all(12),
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF121A14) : Colors.white,
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(
-            color: isDark ? Colors.white.withOpacity(0.08) : const Color(0x14000000),
-          ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: SingleChildScrollView(
+              child: Container(
+                margin: const EdgeInsets.all(12),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF121A14) : Colors.white,
+                  borderRadius: BorderRadius.circular(22),
+                  border: Border.all(
+                    color: isDark ? Colors.white.withOpacity(0.08) : const Color(0x14000000),
+                  ),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
             _menuTile(ctx, Icons.person_outline_rounded,
                 l10n.t('um_profile'), () {
               Navigator.pop(ctx);
-              ctx.push('/profile');
+              if (currentLoc != '/profile') ctx.push('/profile');
             }),
             _menuTile(ctx, Icons.backpack_outlined,
                 l10n.t('um_inventory'), () {
               Navigator.pop(ctx);
-              ctx.push('/inventory');
+              if (currentLoc != '/inventory') ctx.push('/inventory');
             }),
             _menuTile(
               ctx,
@@ -443,13 +592,13 @@ class UserPill extends ConsumerWidget {
             _menuTile(ctx, Icons.settings_outlined,
                 l10n.t('um_settings'), () {
               Navigator.pop(ctx);
-              ctx.push('/settings');
+              if (currentLoc != '/settings') ctx.push('/settings');
             }),
             _menuTile(
                 ctx, Icons.support_agent_outlined, l10n.t('um_support'),
                 () {
               Navigator.pop(ctx);
-              ctx.push('/support');
+              if (currentLoc != '/support') ctx.push('/support');
             }),
             const Divider(height: 8),
             _menuTile(ctx, Icons.logout_rounded, l10n.t('um_logout'), () {
@@ -457,7 +606,11 @@ class UserPill extends ConsumerWidget {
               ref.read(authProvider.notifier).logout();
             }, danger: true),
             const SizedBox(height: 6),
-          ],
+                  ],
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -469,10 +622,14 @@ class UserPill extends ConsumerWidget {
       leading: Icon(icon, color: danger ? AppColors.danger : null, size: 20),
       title: Text(
         label,
+        maxLines: 1,
+        overflow: TextOverflow.visible,
+        softWrap: false,
         style: TextStyle(
           fontWeight: FontWeight.w600,
           fontSize: 14,
           color: danger ? AppColors.danger : null,
+          decoration: TextDecoration.none,
         ),
       ),
       onTap: onTap,
@@ -485,7 +642,7 @@ class UserPill extends ConsumerWidget {
 /// Карточка раздела в стиле макетов: скругление 20, тонкая рамка,
 /// опциональная неоновая подсветка (Shop), ховер-приподнимание на десктопе
 /// и scale-анимация при нажатии. Внутри — произвольный контент.
-class BrandCard extends StatefulWidget {
+class BrandCard extends ConsumerStatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
   final bool highlighted;
@@ -502,25 +659,37 @@ class BrandCard extends StatefulWidget {
   });
 
   @override
-  State<BrandCard> createState() => _BrandCardState();
+  ConsumerState<BrandCard> createState() => _BrandCardState();
 }
 
-class _BrandCardState extends State<BrandCard> {
+class _BrandCardState extends ConsumerState<BrandCard> {
   bool _hover = false;
   bool _press = false;
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final green = isDark ? AppColors.brandNeon : AppColors.brandGreen;
+    final appTheme = ref.watch(appThemeProvider);
+    final green = switch (appTheme) {
+      AppThemeId.darkOrange => AppColors.darkOrangeNeon,
+      AppThemeId.darkBlue => AppColors.darkBlueNeon,
+      _ => isDark ? AppColors.brandNeon : AppColors.brandGreen,
+    };
 
-    final bg = isDark ? const Color(0xFF0F1712).withOpacity(0.92) : Colors.white;
+    final bg = switch (appTheme) {
+      AppThemeId.darkOrange => const Color(0xFF2A1B12).withOpacity(0.94),
+      AppThemeId.darkBlue => const Color(0xFF162040).withOpacity(0.94),
+      _ => isDark ? const Color(0xFF0F1712).withOpacity(0.92) : Colors.white,
+    };
     final border = widget.highlighted
         ? green.withOpacity(isDark ? 0.9 : 0.7)
         : (isDark ? Colors.white.withOpacity(0.08) : const Color(0xFFE3E8E3));
 
+    // Убраны тяжёлые boxShadow и hover-анимация для ПК — причина лагов на 1080p
     return MouseRegion(
-      onEnter: (_) => setState(() => _hover = true),
+      onEnter: (_) {
+        if (widget.onTap != null) setState(() => _hover = true);
+      },
       onExit: (_) => setState(() => _hover = false),
       cursor: widget.onTap != null ? SystemMouseCursors.click : SystemMouseCursors.basic,
       child: GestureDetector(
@@ -529,29 +698,19 @@ class _BrandCardState extends State<BrandCard> {
         onTapCancel: () => setState(() => _press = false),
         onTap: widget.onTap,
         child: AnimatedScale(
-          scale: _press ? 0.975 : (_hover && widget.onTap != null ? 1.015 : 1.0),
-          duration: const Duration(milliseconds: 140),
+          scale: _press ? 0.975 : 1.0,
+          duration: const Duration(milliseconds: 100),
           curve: Curves.easeOut,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 220),
+          child: Container(
             padding: widget.padding,
             decoration: BoxDecoration(
               color: bg,
               borderRadius: BorderRadius.circular(widget.borderRadius),
               border: Border.all(color: border, width: widget.highlighted ? 1.4 : 1),
-              boxShadow: [
-                if (widget.highlighted)
-                  BoxShadow(
-                    color: green.withOpacity(isDark ? 0.28 : 0.18),
-                    blurRadius: 26,
-                    spreadRadius: -4,
-                  ),
-                BoxShadow(
-                  color: Colors.black.withOpacity(isDark ? 0.35 : 0.05),
-                  blurRadius: 18,
-                  offset: Offset(0, _hover ? 10 : 6),
-                ),
-              ],
+              // BoxShadow убран/упрощён для производительности
+              boxShadow: widget.highlighted
+                  ? [BoxShadow(color: green.withOpacity(isDark ? 0.18 : 0.12), blurRadius: 12, spreadRadius: -2)]
+                  : null,
             ),
             child: widget.child,
           ),
@@ -608,17 +767,20 @@ class _EntranceAnimState extends State<EntranceAnim> with SingleTickerProviderSt
   @override
   void initState() {
     super.initState();
+    // Оптимизировано для ПК: уменьшена длительность и стаггер, меньше нагрузки на vsync
     _c = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 520),
+      duration: const Duration(milliseconds: 320),
     );
-    Future.delayed(Duration(milliseconds: 60 * widget.index), () {
+    // Ограничиваем задержку чтобы не спамить таймерами при большом списке
+    final delay = (widget.index % 6) * 40;
+    Future.delayed(Duration(milliseconds: delay), () {
       if (mounted) _c.forward();
     });
     final curve = CurvedAnimation(parent: _c, curve: Curves.easeOutCubic);
     _fade = Tween(begin: 0.0, end: 1.0).animate(curve);
-    _slide = Tween(begin: const Offset(0, 0.14), end: Offset.zero).animate(curve);
-    _scale = Tween(begin: 0.96, end: 1.0).animate(curve);
+    _slide = Tween(begin: const Offset(0, 0.08), end: Offset.zero).animate(curve);
+    _scale = Tween(begin: 0.98, end: 1.0).animate(curve);
   }
 
   @override

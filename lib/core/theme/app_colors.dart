@@ -52,6 +52,22 @@ class AppColors {
   static const Color lightTextPrimary = Color(0xFF111114);
   static const Color lightTextSecondary = Color(0xFF6B7280);
 
+  // Dark Orange theme — тёмно-оранжевая
+  static const Color darkOrangeBgTop = Color(0xFF1A0F0A);
+  static const Color darkOrangeBgBottom = Color(0xFF2A1408);
+  static const Color darkOrangeSurface = Color(0xFF22150E);
+  static const Color darkOrangeCard = Color(0xFF2E1A0D);
+  static const Color darkOrangeAccent = Color(0xFFFF6B00);
+  static const Color darkOrangeNeon = Color(0xFFFF8C1A);
+
+  // Dark Blue theme — тёмно-синяя
+  static const Color darkBlueBgTop = Color(0xFF0A0F1A);
+  static const Color darkBlueBgBottom = Color(0xFF0F1A2E);
+  static const Color darkBlueSurface = Color(0xFF0E1528);
+  static const Color darkBlueCard = Color(0xFF111D33);
+  static const Color darkBlueAccent = Color(0xFF2B7FFF);
+  static const Color darkBlueNeon = Color(0xFF4D9FFF);
+
   static Color rarityColor(String rarity) {
     switch (rarity.toLowerCase()) {
       case 'rare':

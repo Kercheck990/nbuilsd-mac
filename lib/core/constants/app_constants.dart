@@ -35,14 +35,17 @@ class AppConstants {
   static const List<double> quickMultipliers = [2, 5, 10];
   static const List<double> quickChancePercents = [10, 25, 50, 75];
 
-  // Геометрия гейджа
-  static const double gaugeStartAngleDeg = 135; // ~7 часов
-  static const double gaugeSweepAngleDeg = 270;
+  // Геометрия гейджа — ПОЛНЫЙ КРУГ 360° для честного отображения шанса.
+  // 0% = верх (-90°), рост по часовой. Зелёный сектор = шанс (до 75%),
+  // остаток круга = зона проигрыша (тёмная). Стрелка strelka.png вращается
+  // вокруг центра и останавливается на rollPercent.
+  static const double gaugeStartAngleDeg = -90; // верх (12 часов)
+  static const double gaugeSweepAngleDeg = 360;
 
   // Анимация вращения
   static const Duration spinDuration = Duration(milliseconds: 3000);
   static const int spinFullRotationsMin = 2;
-  static const int spinFullRotationsMax = 4;
+  static const int spinFullRotationsMax = 5;
 
   // Ответственная игра
   static const double defaultDailyStakeLimitCoins = 5000;

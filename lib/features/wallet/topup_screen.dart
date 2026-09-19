@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -37,7 +38,7 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
   static const _presets = [100, 500, 1000, 2500, 5000, 10000];
 
   int _amount = 500;
-  String _provider = 'card';
+  String _provider = 'crypto';
   bool _busy = false;
   String? _paymentId;
   Timer? _poll;
@@ -84,38 +85,10 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
   }
 
   Future<void> _pay() async {
-    final l10n = context.l10n;
-    if (_amount < minAmount) {
-      _snack(l10n.f('topup_min', {'min': '$minAmount'}));
-      return;
-    }
-    setState(() {
-      _busy = true;
-      _statusKey = 'topup_opening';
-    });
-
-    try {
-      final res = await ApiClient.instance.createPayment(
-        amountCoins: _amount,
-        provider: _provider,
-      );
-      _paymentId = res['payment_id'] as String;
-      final payUrl = res['pay_url'] as String?;
-
-      if (payUrl != null && payUrl.isNotEmpty) {
-        final uri = Uri.parse(payUrl);
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      }
-
-      setState(() => _statusKey = 'topup_waiting');
-      _startPolling();
-    } on ApiException catch (e) {
-      setState(() {
-        _busy = false;
-        _statusKey = null;
-      });
-      _snack(l10n.t(e.code == 'error_network' ? 'error_network' : 'topup_failed'));
-    }
+    // Упрощено: донат только через ТГ менеджера
+    final uri = Uri.parse('https://t.me/nftgrademanager');
+    if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+    _snack('Напиши менеджеру @nftgrademanager для пополнения');
   }
 
   /// Опрос статуса раз в 3 секунды, максимум 5 минут.
@@ -188,6 +161,20 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFC107).withOpacity(0.12),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFFFC107).withOpacity(0.45)),
+              ),
+              child: Row(children: [
+                Container(width: 36, height: 36, decoration: BoxDecoration(color: const Color(0xFFFFC107), borderRadius: BorderRadius.circular(10)), child: const Icon(Icons.stars_rounded, color: Colors.black)),
+                const SizedBox(width: 12),
+                const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('NPC · NFT Premium Coin', style: TextStyle(fontWeight: FontWeight.w800)), Text('Донат валюта для Shop, бустов, кейсов. Покупка через крипту (USDT/TON) — реальные деньги.', style: TextStyle(fontSize: 11, color: Colors.grey))])),
+              ]),
+            ),
+            const SizedBox(height: 16),
             Text(l10n.t('topup_amount'),
                 style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 10),
@@ -265,6 +252,9 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
                 ),
               );
             }),
+            if (_provider == 'crypto') const _CryptoWalletCard(),
+            if (_provider == 'card' || _provider == 'stars') const _TelegramPayCard(),
+            const _RatesCard(),
             const SizedBox(height: 8),
             if (_statusKey != null)
               Padding(
@@ -287,7 +277,7 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
             SizedBox(
               width: double.infinity,
               height: 54,
-              child: FilledButton(
+              child: FilledButton.icon(
                 style: FilledButton.styleFrom(
                   backgroundColor: AppColors.accentYellow,
                   foregroundColor: Colors.black87,
@@ -295,20 +285,14 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
                     borderRadius: BorderRadius.circular(16),
                   ),
                 ),
-                onPressed: _busy ? null : _pay,
-                child: Text(
-                  l10n.f('topup_pay', {'amount': '$_amount'}),
-                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+                onPressed: _pay,
+                icon: const Icon(Icons.send_rounded, size: 18),
+                label: Text(
+                  'Написать @nftgrademanager — $_amount NPC',
+                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
                 ),
               ),
             ),
-            if (_paymentId != null) ...[
-              const SizedBox(height: 10),
-              TextButton(
-                onPressed: () => _checkOnce(),
-                child: Text(l10n.t('topup_check')),
-              ),
-            ],
             const SizedBox(height: 20),
             Text(l10n.t('promo_title'),
                 style: Theme.of(context).textTheme.titleMedium),
@@ -351,6 +335,62 @@ class _TopUpScreenState extends ConsumerState<TopUpScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _CryptoWalletCard extends StatelessWidget {
+  const _CryptoWalletCard();
+  @override
+  Widget build(BuildContext context) {
+    const wallet = 'UQCAW2p8UQ6hyCrimP0yFrO3R9GjOwZJmoSfWMb-qRfhJ_pV';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: const Color(0xFF1A1A1A), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFF2B7FFF).withOpacity(0.3))),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Row(children: [Icon(Icons.currency_bitcoin, size: 16, color: Color(0xFF2B7FFF)), SizedBox(width: 6), Text('Крипто кошелёк (TON)', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, decoration: TextDecoration.none))]),
+        const SizedBox(height: 6),
+        SelectableText(wallet, style: const TextStyle(fontSize: 11, color: Colors.white70, fontFamily: 'monospace')),
+        const SizedBox(height: 8),
+        SizedBox(width: double.infinity, child: OutlinedButton.icon(onPressed: () { Clipboard.setData(const ClipboardData(text: wallet)); TopNotify.show(context, 'Кошелек скопирован', success: true); }, icon: const Icon(Icons.copy_rounded, size: 14), label: const Text('Копировать', style: TextStyle(fontSize: 12)))),
+      ]),
+    );
+  }
+}
+
+class _TelegramPayCard extends StatelessWidget {
+  const _TelegramPayCard();
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: const Color(0xFF1A1A1A), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFF2B7FFF).withOpacity(0.3))),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Row(children: [Icon(Icons.send_rounded, size: 16, color: Color(0xFF2B7FFF)), SizedBox(width: 6), Text('Оплата на карту / Telegram Stars', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, decoration: TextDecoration.none))]),
+        const SizedBox(height: 6),
+        const Text('Пиши менеджеру: @nftgrademanager', style: TextStyle(fontSize: 12, color: Colors.white, decoration: TextDecoration.none)),
+        const SizedBox(height: 6),
+        SizedBox(width: double.infinity, child: OutlinedButton.icon(onPressed: () async { final uri = Uri.parse('https://t.me/nftgrademanager'); if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication); }, icon: const Icon(Icons.open_in_new_rounded, size: 14), label: const Text('Открыть @nftgrademanager', style: TextStyle(fontSize: 12)))),
+      ]),
+    );
+  }
+}
+
+class _RatesCard extends StatelessWidget {
+  const _RatesCard();
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: Colors.white.withOpacity(0.03), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white10)),
+      child: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [Icon(Icons.info_outline_rounded, size: 16, color: Colors.grey), SizedBox(width: 6), Text('Курс', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, decoration: TextDecoration.none))]),
+        SizedBox(height: 6),
+        Text('1 ⭐ Telegram Stars = 0.3 NPC\n1 ₴ гривна = 1.5 NPC', style: TextStyle(fontSize: 12, color: Colors.grey, height: 1.4, decoration: TextDecoration.none)),
+      ]),
     );
   }
 }

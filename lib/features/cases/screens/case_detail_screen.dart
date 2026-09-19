@@ -38,8 +38,14 @@ class _CaseDetailScreenState extends ConsumerState<CaseDetailScreen> {
     final detail = ref.read(caseDetailProvider(widget.caseId));
     final c = detail.info;
     if (c == null) return;
+    final isDaily = c.id == 'case_daily';
+    if (isDaily && detail.dailyRemaining <= 0) {
+      TopNotify.show(context, context.l10n.t('case_daily_done'), success: false);
+      return;
+    }
+    final effectiveCount = isDaily ? (_count.clamp(1, detail.dailyRemaining)) : _count;
     final user = ref.read(userProvider);
-    final total = c.priceNc * _count;
+    final total = c.priceNc * effectiveCount;
     if (total > user.balanceNc) {
       TopNotify.show(context, context.l10n.t('case_not_enough_nc'), success: false);
       return;
@@ -50,7 +56,7 @@ class _CaseDetailScreenState extends ConsumerState<CaseDetailScreen> {
       _lastWon = [];
     });
     try {
-      final won = await ref.read(caseOpenProvider.notifier).open(c.id, _count);
+      final won = await ref.read(caseOpenProvider.notifier).open(c.id, effectiveCount);
       // баланс — безопасно, не падаем если me вернул null
       try {
         final me = await ApiClient.instance.me();
@@ -73,6 +79,7 @@ class _CaseDetailScreenState extends ConsumerState<CaseDetailScreen> {
         ref.read(userProvider.notifier).setNc(user.balanceNc - total);
       }
       await ref.read(inventoryProvider.notifier).refresh();
+      await ref.read(caseDetailProvider(widget.caseId).notifier).load();
 
       final wonAsPool = won.map((w) => CaseItemModel(itemId: w.itemId, name: w.name, priceCoins: w.priceCoins, rarity: w.rarity, imageAsset: w.imageAsset, dropChance: w.dropChance)).toList();
       setState(() {
@@ -123,8 +130,15 @@ class _CaseDetailScreenState extends ConsumerState<CaseDetailScreen> {
     }
     final c = detail.info!;
     final items = detail.items;
-    final totalPrice = c.priceNc * _count;
+    final isDaily = c.id == 'case_daily';
+    final dailyRemaining = detail.dailyRemaining;
+    final dailyNextReset = detail.dailyNextReset;
+    // Для ежедневного ограничиваем выбор количества оставшимися открытиями
+    final maxCountForCase = isDaily ? dailyRemaining : 10;
+    final effectiveCount = _count > maxCountForCase && maxCountForCase > 0 ? maxCountForCase : _count;
+    final totalPrice = c.priceNc * effectiveCount;
     final canAfford = totalPrice <= user.balanceNc;
+    final canOpenDaily = !isDaily || dailyRemaining > 0;
     final priceLabel = c.priceNc == 0 ? (c.id == 'case_daily' ? l10n.t('case_daily_free') : l10n.t('case_trash_free')) : '$totalPrice NC';
 
     return Scaffold(
@@ -155,15 +169,15 @@ class _CaseDetailScreenState extends ConsumerState<CaseDetailScreen> {
                   ),
                 ),
               ),
-              // картинка кейса
+              // картинка кейса — уменьшена
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Container(
-                    height: 160,
+                    height: 110,
                     decoration: BoxDecoration(
                       color: isDark ? const Color(0xFF0F0F0F) : Colors.white,
-                      borderRadius: BorderRadius.circular(18),
+                      borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: Colors.white10),
                     ),
                     clipBehavior: Clip.antiAlias,
@@ -171,40 +185,58 @@ class _CaseDetailScreenState extends ConsumerState<CaseDetailScreen> {
                       alignment: Alignment.center,
                       children: [
                         Container(
-                          width: 130,
-                          height: 130,
+                          width: 90,
+                          height: 90,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            gradient: RadialGradient(colors: [AppColors.brandGreen.withOpacity(0.14), Colors.transparent]),
+                            gradient: RadialGradient(colors: [AppColors.brandGreen.withOpacity(0.12), Colors.transparent]),
                           ),
                         ),
                         Image.asset(
                           c.imageAsset ?? 'assets/case/${c.id}.png',
-                          width: 115,
-                          height: 115,
+                          width: 85,
+                          height: 85,
                           fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) => Image.asset('assets/iconmainmenu/case.png', width: 95, height: 95, errorBuilder: (_, __, ___) => const Icon(Icons.inventory_2, size: 64, color: AppColors.brandNeon)),
+                          errorBuilder: (_, __, ___) => Image.asset('assets/iconmainmenu/case.png', width: 70, height: 70, errorBuilder: (_, __, ___) => const Icon(Icons.inventory_2, size: 48, color: AppColors.brandNeon)),
                         ),
                       ],
                     ),
                   ),
                 ),
               ),
-              const SliverToBoxAdapter(child: SizedBox(height: 14)),
-              // цена + счетчик
+              const SliverToBoxAdapter(child: SizedBox(height: 10)),
               SliverToBoxAdapter(
                 child: Center(
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.stars, color: Color(0xFFFFC107), size: 22),
-                      const SizedBox(width: 6),
-                      Text(priceLabel, style: const TextStyle(color: Color(0xFFFFC107), fontWeight: FontWeight.w900, fontSize: 18)),
+                      const Icon(Icons.stars, color: Color(0xFFFFC107), size: 18),
+                      const SizedBox(width: 5),
+                      Text(priceLabel, style: const TextStyle(color: Color(0xFFFFC107), fontWeight: FontWeight.w900, fontSize: 15, decoration: TextDecoration.none)),
                     ],
                   ),
                 ),
               ),
-              const SliverToBoxAdapter(child: SizedBox(height: 12)),
+              if (isDaily)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(color: Colors.black.withOpacity(0.35), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white10)),
+                      child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                        const Icon(Icons.inventory_2, size: 14, color: Colors.white70),
+                        const SizedBox(width: 6),
+                        Text('Осталось $dailyRemaining/10', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700, decoration: TextDecoration.none)),
+                        if (dailyRemaining <= 0 && dailyNextReset != null) ...[
+                          const SizedBox(width: 10),
+                          _DailyCountdown(nextReset: dailyNextReset),
+                        ],
+                      ]),
+                    ),
+                  ),
+                ),
+              const SliverToBoxAdapter(child: SizedBox(height: 8)),
               // рулетка или заглушка
               if (_wonPool.isNotEmpty && _spinning)
                 SliverToBoxAdapter(
@@ -236,31 +268,31 @@ class _CaseDetailScreenState extends ConsumerState<CaseDetailScreen> {
                   ),
                 ),
               const SliverToBoxAdapter(child: SizedBox(height: 14)),
-              // выбор количества 1..10
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                    decoration: BoxDecoration(color: Colors.black.withOpacity(0.45), borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.white10)),
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                    decoration: BoxDecoration(color: Colors.black.withOpacity(0.45), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white10)),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: List.generate(10, (i) {
                         final n = i + 1;
-                        final sel = _count == n;
+                        final sel = effectiveCount == n;
+                        final disabled = isDaily && n > dailyRemaining;
                         return Expanded(
                           child: GestureDetector(
-                            onTap: _spinning ? null : () => setState(() => _count = n),
+                            onTap: (_spinning || disabled) ? null : () => setState(() => _count = n),
                             child: Container(
-                              margin: const EdgeInsets.symmetric(horizontal: 2),
-                              height: 36,
+                              margin: const EdgeInsets.symmetric(horizontal: 1),
+                              height: 32,
                               decoration: BoxDecoration(
                                 color: sel ? Colors.white : Colors.transparent,
-                                borderRadius: BorderRadius.circular(10),
+                                borderRadius: BorderRadius.circular(8),
                                 border: sel ? null : Border.all(color: Colors.transparent),
                               ),
                               alignment: Alignment.center,
-                              child: Text('$n', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: sel ? Colors.black : Colors.white)),
+                              child: Text('$n', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: disabled ? Colors.white24 : (sel ? Colors.black : Colors.white), decoration: TextDecoration.none)),
                             ),
                           ),
                         );
@@ -269,17 +301,16 @@ class _CaseDetailScreenState extends ConsumerState<CaseDetailScreen> {
                   ),
                 ),
               ),
-              const SliverToBoxAdapter(child: SizedBox(height: 14)),
-              // кнопка открыть
+              const SliverToBoxAdapter(child: SizedBox(height: 10)),
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 40),
                   child: SizedBox(
-                    height: 48,
+                    height: 42,
                     child: ElevatedButton(
-                      onPressed: (_spinning || !canAfford) ? null : _open,
+                      onPressed: (_spinning || !canAfford || !canOpenDaily) ? null : _open,
                       style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF7A00), disabledBackgroundColor: Colors.grey[800], shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                      child: Text(_spinning ? l10n.t('case_opening') : l10n.t('case_open'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
+                      child: Text(_spinning ? l10n.t('case_opening') : l10n.t('case_open'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14, decoration: TextDecoration.none)),
                     ),
                   ),
                 ),
@@ -288,22 +319,34 @@ class _CaseDetailScreenState extends ConsumerState<CaseDetailScreen> {
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.only(top: 8),
-                    child: Center(child: Text(l10n.t('case_not_enough_nc'), style: const TextStyle(color: Colors.redAccent, fontSize: 12))),
+                    child: Center(child: Text(l10n.t('case_not_enough_nc'), style: const TextStyle(color: Colors.redAccent, fontSize: 12, decoration: TextDecoration.none))),
                   ),
                 ),
-              const SliverToBoxAdapter(child: SizedBox(height: 18)),
-              // список предметов в кейсе
+              if (isDaily && !canOpenDaily && !_spinning)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Center(child: Text(l10n.t('case_daily_done'), style: const TextStyle(color: Colors.orangeAccent, fontSize: 12, decoration: TextDecoration.none))),
+                  ),
+                ),
+              const SliverToBoxAdapter(child: SizedBox(height: 14)),
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Text(l10n.t('case_items_in'), textAlign: TextAlign.center, style: TextStyle(color: isDark ? Colors.white : const Color(0xFF101410), fontWeight: FontWeight.w900, fontSize: 16)),
+                  child: Text(l10n.t('case_items_in'), textAlign: TextAlign.center, style: TextStyle(color: isDark ? Colors.white : const Color(0xFF101410), fontWeight: FontWeight.w900, fontSize: 14, decoration: TextDecoration.none)),
                 ),
               ),
-              const SliverToBoxAdapter(child: SizedBox(height: 10)),
+              const SliverToBoxAdapter(child: SizedBox(height: 8)),
               SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 24),
                 sliver: SliverGrid(
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 0.92, crossAxisSpacing: 10, mainAxisSpacing: 10),
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    // уменьшены — как на 1 фото: компактные карточки, 3 в ряд на узком, 4 на широком
+                    crossAxisCount: MediaQuery.of(context).size.width >= 600 ? 4 : 3,
+                    childAspectRatio: 0.85,
+                    crossAxisSpacing: 6,
+                    mainAxisSpacing: 6,
+                  ),
                   delegate: SliverChildBuilderDelegate((context, i) {
                     final it = items[i];
                     return _CaseItemTile(item: it);
@@ -363,41 +406,37 @@ class _CaseItemTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final col = _rarityColor(item.rarity);
     final displayName = item.name.isEmpty ? item.itemId : item.name;
+    // Уменьшены — ровные карточки с лёгкой скруглённостью по концам как на фото 2
     return Container(
-      decoration: BoxDecoration(color: const Color(0xFF1A1A1A), borderRadius: BorderRadius.circular(14), border: Border.all(color: col.withOpacity(0.35))),
-      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(color: const Color(0xFF1A1A1A), borderRadius: BorderRadius.circular(10), border: Border.all(color: col.withOpacity(0.30), width: 1)),
+      padding: const EdgeInsets.all(6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            Text('${item.dropChance.toStringAsFixed(item.dropChance.truncateToDouble() == item.dropChance ? 0 : 2)}%', style: const TextStyle(color: Colors.white70, fontSize: 12, fontStyle: FontStyle.italic)),
-            const Icon(Icons.close, size: 14, color: Colors.white24),
+            Text('${item.dropChance.toStringAsFixed(item.dropChance.truncateToDouble() == item.dropChance ? 0 : 2)}%', style: const TextStyle(color: Colors.white70, fontSize: 10, fontStyle: FontStyle.italic, decoration: TextDecoration.none)),
+            const Icon(Icons.close, size: 12, color: Colors.white24),
           ]),
           Expanded(
             child: Center(
-              child: Builder(builder: (context) {
-                // пробуем 3 варианта пути как в GiftAssets
-                final candidates = [item.resolvedAsset, 'assets/gifts/${item.itemId}.png'];
-                return Image.asset(item.resolvedAsset, fit: BoxFit.contain, errorBuilder: (_, __, ___) {
-                  // fallback на GiftAssets
-                  final fallback = _giftFallback(item.itemId);
-                  if (fallback != null && fallback != item.resolvedAsset) {
-                    return Image.asset(fallback, fit: BoxFit.contain, errorBuilder: (_, __, ___) => Text('🎁', style: TextStyle(fontSize: 32, color: col)));
-                  }
-                  return Text('🎁', style: TextStyle(fontSize: 32, color: col));
-                });
+              child: Image.asset(item.resolvedAsset, fit: BoxFit.contain, cacheWidth: 128, errorBuilder: (_, __, ___) {
+                final fallback = _giftFallback(item.itemId);
+                if (fallback != null && fallback != item.resolvedAsset) {
+                  return Image.asset(fallback, fit: BoxFit.contain, cacheWidth: 128, errorBuilder: (_, __, ___) => Text('🎁', style: TextStyle(fontSize: 24, color: col)));
+                }
+                return Text('🎁', style: TextStyle(fontSize: 24, color: col));
               }),
             ),
           ),
-          Text(displayName, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 4),
+          Text(displayName, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w600, decoration: TextDecoration.none)),
+          const SizedBox(height: 3),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(color: const Color(0xFF0F0F0F), borderRadius: BorderRadius.circular(8)),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+            decoration: BoxDecoration(color: const Color(0xFF0F0F0F), borderRadius: BorderRadius.circular(6)),
             child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              const Icon(Icons.stars, size: 12, color: Color(0xFFFFC107)),
-              const SizedBox(width: 4),
-              Text('${item.priceCoins}', style: const TextStyle(color: Color(0xFFFFC107), fontWeight: FontWeight.w800, fontSize: 12)),
+              const Icon(Icons.stars, size: 10, color: Color(0xFFFFC107)),
+              const SizedBox(width: 3),
+              Text('${item.priceCoins}', style: const TextStyle(color: Color(0xFFFFC107), fontWeight: FontWeight.w800, fontSize: 10, decoration: TextDecoration.none)),
             ]),
           ),
         ],
@@ -438,6 +477,25 @@ class _CaseItemTile extends StatelessWidget {
   }
 }
 
+class _DailyCountdown extends StatelessWidget {
+  final DateTime nextReset;
+  const _DailyCountdown({required this.nextReset});
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder(
+      stream: Stream.periodic(const Duration(seconds: 1)),
+      builder: (_, __) {
+        final left = nextReset.difference(DateTime.now());
+        if (left.isNegative) return const Text('доступно', style: TextStyle(color: Colors.greenAccent, fontSize: 11, decoration: TextDecoration.none));
+        final h = left.inHours;
+        final m = left.inMinutes % 60;
+        final s = left.inSeconds % 60;
+        return Text('${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}', style: const TextStyle(color: Colors.orangeAccent, fontSize: 11, fontWeight: FontWeight.w700, decoration: TextDecoration.none, fontFeatures: [FontFeature.tabularFigures()]));
+      },
+    );
+  }
+}
+
 class _WinDialog extends StatelessWidget {
   final List<CaseOpenWon> won;
   const _WinDialog({required this.won});
@@ -446,11 +504,11 @@ class _WinDialog extends StatelessWidget {
     return AlertDialog(
       backgroundColor: const Color(0xFF101814),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: Text('Вы выиграли!', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800), textAlign: TextAlign.center),
+      title: const Text('Вы выиграли!', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800), textAlign: TextAlign.center),
       content: Column(mainAxisSize: MainAxisSize.min, children: [
         Wrap(spacing: 10, runSpacing: 10, alignment: WrapAlignment.center, children: won.map((w) => _WonTile(won: w)).toList()),
         const SizedBox(height: 12),
-        Text('Предметы добавлены в инвентарь', style: TextStyle(color: Colors.white70, fontSize: 12)),
+        const Text('Предметы добавлены в инвентарь', style: TextStyle(color: Colors.white70, fontSize: 12)),
       ]),
       actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Ок', style: TextStyle(color: AppColors.brandGreen)))],
     );

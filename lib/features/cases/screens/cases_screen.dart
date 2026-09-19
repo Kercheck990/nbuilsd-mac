@@ -53,7 +53,6 @@ class _CasesScreenState extends ConsumerState<CasesScreen> {
                   ),
                 ),
               ),
-              // NC баланс pill как в меню?
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
@@ -69,7 +68,7 @@ class _CasesScreenState extends ConsumerState<CasesScreen> {
                         child: Row(children: [
                           const Icon(Icons.monetization_on, color: Color(0xFFFFC107), size: 18),
                           const SizedBox(width: 6),
-                          Text('${user.balanceNc} NC', style: TextStyle(fontWeight: FontWeight.w800, color: isDark ? Colors.white : const Color(0xFF101410))),
+                          Text('${user.balanceNc} NC', style: TextStyle(fontWeight: FontWeight.w800, color: isDark ? Colors.white : const Color(0xFF101410), decoration: TextDecoration.none)),
                         ]),
                       ),
                       const SizedBox(width: 10),
@@ -83,7 +82,7 @@ class _CasesScreenState extends ConsumerState<CasesScreen> {
                         child: Row(children: [
                           const Icon(Icons.account_balance_wallet, color: AppColors.brandGreen, size: 16),
                           const SizedBox(width: 6),
-                          Text('${user.balanceCoins}', style: TextStyle(fontWeight: FontWeight.w700, color: isDark ? Colors.white70 : const Color(0xFF6B7280), fontSize: 13)),
+                          Text('${user.balanceCoins}', style: TextStyle(fontWeight: FontWeight.w700, color: isDark ? Colors.white70 : const Color(0xFF6B7280), fontSize: 13, decoration: TextDecoration.none)),
                         ]),
                       ),
                     ],
@@ -97,32 +96,77 @@ class _CasesScreenState extends ConsumerState<CasesScreen> {
                     children: [
                       Container(width: 3, height: 18, decoration: BoxDecoration(color: AppColors.brandGreen, borderRadius: BorderRadius.circular(2))),
                       const SizedBox(width: 10),
-                      Text(l10n.t('cases_special'), style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, letterSpacing: 0.6, color: isDark ? Colors.white : const Color(0xFF101410))),
+                      Text(l10n.t('cases_special'), style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, letterSpacing: 0.6, color: isDark ? Colors.white : const Color(0xFF101410), decoration: TextDecoration.none)),
                     ],
                   ),
                 ),
               ),
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
-                sliver: casesState.when(
-                  loading: () => const SliverToBoxAdapter(child: Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator()))),
-                  error: (e, _) => SliverToBoxAdapter(child: Center(child: Padding(padding: EdgeInsets.all(24), child: Text('Ошибка загрузки')))),
-                  data: (list) {
-                    if (list.isEmpty) return const SliverToBoxAdapter(child: Center(child: Text('Кейсов пока нет')));
-                    return SliverGrid(
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: MediaQuery.of(context).size.width >= 980 ? 4 : MediaQuery.of(context).size.width >= 700 ? 3 : 2,
-                        childAspectRatio: 0.85,
-                        crossAxisSpacing: 10,
-                        mainAxisSpacing: 10,
-                      ),
-                      delegate: SliverChildBuilderDelegate((context, i) {
-                        final c = list[i];
-                        return EntranceAnim(index: i, child: _CaseCard(caseModel: c, onTap: () => context.push('/cases/${c.id}')));
-                      }, childCount: list.length),
-                    );
-                  },
-                ),
+              casesState.when(
+                loading: () => const SliverToBoxAdapter(child: Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator()))),
+                error: (e, _) => SliverToBoxAdapter(child: Center(child: Padding(padding: EdgeInsets.all(24), child: Text('Ошибка загрузки', style: TextStyle(decoration: TextDecoration.none))))),
+                data: (list) {
+                  if (list.isEmpty) return const SliverToBoxAdapter(child: Center(child: Text('Кейсов пока нет', style: TextStyle(decoration: TextDecoration.none))));
+                  // Разделяем: сверху Мусор+Ежедневный вдвоём, чуть ниже 3 платных (McLaren, Офис, Бурж)
+                  final trash = list.where((c) => c.id == 'case_trash').toList();
+                  final daily = list.where((c) => c.id == 'case_daily').toList();
+                  final paid = list.where((c) => c.id != 'case_trash' && c.id != 'case_daily').toList();
+                  // fallback если id другие
+                  final topTwo = [...trash, ...daily];
+                  if (topTwo.length < 2 && list.length >= 2) {
+                    // если мусор/дэйли не найдены — берём первые два как топ
+                    topTwo.clear();
+                    topTwo.addAll(list.take(2));
+                    paid.clear();
+                    paid.addAll(list.skip(2));
+                  }
+                  return SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
+                    sliver: SliverList.list(
+                      children: [
+                        // Верхний ряд — 2 карточки (Мусор и Ежедневный) — компактные, фото крупнее
+                        if (topTwo.isNotEmpty)
+                          GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 2,
+                              childAspectRatio: 1.25,
+                              crossAxisSpacing: 8,
+                              mainAxisSpacing: 8,
+                            ),
+                            itemCount: topTwo.length,
+                            itemBuilder: (context, i) {
+                              final c = topTwo[i];
+                              return EntranceAnim(index: i, child: _CaseCard(caseModel: c, onTap: () => context.push('/cases/${c.id}'), compact: true));
+                            },
+                          ),
+                        const SizedBox(height: 12),
+                        // Нижний ряд — 3 платных — ещё компактнее
+                        if (paid.isNotEmpty)
+                          LayoutBuilder(builder: (context, cons) {
+                            final w = MediaQuery.of(context).size.width;
+                            final cols = w >= 700 ? 3 : 2;
+                            return GridView.builder(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: cols,
+                                childAspectRatio: 1.25,
+                                crossAxisSpacing: 8,
+                                mainAxisSpacing: 8,
+                              ),
+                              itemCount: paid.length,
+                              itemBuilder: (context, i) {
+                                final c = paid[i];
+                                return EntranceAnim(index: 2 + i, child: _CaseCard(caseModel: c, onTap: () => context.push('/cases/${c.id}'), compact: true));
+                              },
+                            );
+                          }),
+                        // если есть ещё кейсы сверх 5 — показываем остальные так же
+                      ],
+                    ),
+                  );
+                },
               ),
             ],
           ),
@@ -135,7 +179,8 @@ class _CasesScreenState extends ConsumerState<CasesScreen> {
 class _CaseCard extends StatelessWidget {
   final CaseModel caseModel;
   final VoidCallback onTap;
-  const _CaseCard({required this.caseModel, required this.onTap});
+  final bool compact;
+  const _CaseCard({required this.caseModel, required this.onTap, this.compact = false});
 
   String _priceText(BuildContext context) {
     if (caseModel.id == 'case_trash') return context.l10n.t('case_trash_free');
@@ -147,10 +192,13 @@ class _CaseCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    // Кейсы стали компактнее: меньше картинка и отступы
+    // Ещё уменьшены — как на скрине, но фото внутри увеличено
+    final imageSize = compact ? 88.0 : 78.0;
+    final circleSize = compact ? 90.0 : 80.0;
     return BrandCard(
       onTap: onTap,
-      padding: const EdgeInsets.all(10),
+      borderRadius: 12,
+      padding: EdgeInsets.all(compact ? 6 : 8),
       child: Column(
         children: [
           Expanded(
@@ -158,44 +206,44 @@ class _CaseCard extends StatelessWidget {
               alignment: Alignment.center,
               children: [
                 Container(
-                  width: 78,
-                  height: 78,
+                  width: circleSize,
+                  height: circleSize,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    gradient: RadialGradient(colors: isDark ? [AppColors.brandGreen.withOpacity(0.18), Colors.transparent] : [AppColors.brandGreen.withOpacity(0.12), Colors.transparent]),
+                    gradient: RadialGradient(colors: isDark ? [AppColors.brandGreen.withOpacity(0.14), Colors.transparent] : [AppColors.brandGreen.withOpacity(0.10), Colors.transparent]),
                   ),
                 ),
                 Image.asset(
                   caseModel.imageAsset ?? 'assets/case/${caseModel.id}.png',
-                  width: 78,
-                  height: 78,
+                  width: imageSize,
+                  height: imageSize,
                   fit: BoxFit.contain,
                   errorBuilder: (_, __, ___) => Image.asset(
                     'assets/iconmainmenu/case.png',
-                    width: 64,
-                    height: 64,
+                    width: imageSize * 0.85,
+                    height: imageSize * 0.85,
                     fit: BoxFit.contain,
                     errorBuilder: (_, __, ___) => Container(
-                      width: 64,
-                      height: 64,
+                      width: imageSize * 0.75,
+                      height: imageSize * 0.75,
                       decoration: BoxDecoration(color: const Color(0xFF0C120E), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.brandNeon, width: 1.6)),
                       alignment: Alignment.center,
-                      child: const Text('CASE', style: TextStyle(color: AppColors.brandNeon, fontWeight: FontWeight.w900, fontSize: 13)),
+                      child: const Text('CASE', style: TextStyle(color: AppColors.brandNeon, fontWeight: FontWeight.w900, fontSize: 12, decoration: TextDecoration.none)),
                     ),
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 6),
-          Text(caseModel.name, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: isDark ? Colors.white : const Color(0xFF101410)), textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis),
-          const SizedBox(height: 4),
+          const SizedBox(height: 3),
+          Text(caseModel.name, style: TextStyle(fontWeight: FontWeight.w800, fontSize: compact ? 11 : 12, color: isDark ? Colors.white : const Color(0xFF101410), decoration: TextDecoration.none), textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 2),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.stars, color: Color(0xFFFFC107), size: 13),
-              const SizedBox(width: 4),
-              Text(_priceText(context), style: const TextStyle(color: Color(0xFFFFC107), fontWeight: FontWeight.w800, fontSize: 11)),
+              const Icon(Icons.stars, color: Color(0xFFFFC107), size: 11),
+              const SizedBox(width: 3),
+              Text(_priceText(context), style: const TextStyle(color: Color(0xFFFFC107), fontWeight: FontWeight.w800, fontSize: 10, decoration: TextDecoration.none)),
             ],
           ),
         ],

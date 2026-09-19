@@ -114,6 +114,12 @@ ticketsRouter.post('/:id/messages', async (req, res, next) => {
         `UPDATE tickets SET status = $2, updated_at = now() WHERE id = $1`,
         [req.params.id, req.user.is_admin && !mine ? 'answered' : 'open']
       );
+      // уведомление
+      try {
+        if (req.user.is_admin && !mine) {
+          await client.query(`INSERT INTO notifications (user_id, type, title, body) VALUES ($1,'ticket','Администратор ответил на тикет','Вам ответили в тикете ${ticket.subject}')`, [ticket.user_id]);
+        }
+      } catch (_) {}
       return { ok: true };
     });
 

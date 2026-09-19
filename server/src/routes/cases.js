@@ -2,6 +2,8 @@ import express from 'express';
 import crypto from 'node:crypto';
 import { applyNcBalance, query, withTransaction } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { activeEvents, luckMultiplier } from '../services/events.js';
+import { incDailyProgress } from './daily.js';
 
 export const casesRouter = express.Router();
 
@@ -61,6 +63,13 @@ casesRouter.get('/:id', requireAuth, async (req, res, next) => {
         WHERE ci.case_id=$1 ORDER BY ci.drop_chance DESC`,
       [caseId]
     );
+    let daily = null;
+    if (caseId === 'case_daily') {
+      const { rows: dc } = await query(`SELECT COUNT(*)::int as cnt FROM case_openings WHERE user_id=$1 AND case_id=$2 AND created_at >= CURRENT_DATE`, [req.user.id, caseId]);
+      const used = dc[0].cnt;
+      const { rows: nr } = await query(`SELECT (CURRENT_DATE + interval '1 day')::timestamptz as next_reset`);
+      daily = { used, remaining: Math.max(0, 10 - used), next_reset: nr[0].next_reset };
+    }
     res.json({
       case: {
         id: c.id,
@@ -78,6 +87,7 @@ casesRouter.get('/:id', requireAuth, async (req, res, next) => {
         image_url: r.image_url,
         drop_chance: Number(r.drop_chance),
       })),
+      ...(daily ? { daily } : {}),
     });
   } catch (err) {
     next(err);
@@ -95,7 +105,7 @@ casesRouter.post('/:id/open', requireAuth, async (req, res, next) => {
 
     const result = await withTransaction(async (client) => {
       // блокируем пользователя
-      const uRes = await client.query(`SELECT id, balance_nc FROM users WHERE id=$1 FOR UPDATE`, [req.user.id]);
+      const uRes = await client.query(`SELECT id, balance_nc, boost_x2_until, boost_x4_until FROM users WHERE id=$1 FOR UPDATE`, [req.user.id]);
       if (!uRes.rows.length) throw new Error('user_not_found');
       const user = uRes.rows[0];
 
@@ -105,27 +115,58 @@ casesRouter.post('/:id/open', requireAuth, async (req, res, next) => {
       const priceOne = Number(c.price_nc);
       const totalPrice = priceOne * count;
 
-      // лимиты
+      // лимиты — ежедневный теперь 10/день с счётчиком до сброса
       if (caseId === 'case_daily') {
         const { rows } = await client.query(
-          `SELECT 1 FROM case_openings WHERE user_id=$1 AND case_id=$2 AND created_at >= CURRENT_DATE LIMIT 1`,
+          `SELECT COUNT(*)::int as cnt FROM case_openings WHERE user_id=$1 AND case_id=$2 AND created_at >= CURRENT_DATE`,
           [req.user.id, caseId]
         );
-        if (rows.length) return { error: 'daily_limit', message: 'Ежедневный кейс можно открыть раз в день' };
-        if (count !== 1) return { error: 'daily_single', message: 'Ежедневный кейс — только 1 за раз' };
+        const used = rows[0].cnt;
+        const remaining = 10 - used;
+        if (remaining <= 0) {
+          const { rows: nr } = await client.query(`SELECT (CURRENT_DATE + interval '1 day')::timestamptz as next_reset`);
+          return { error: 'daily_limit', message: 'Дневной лимит 10/день исчерпан', remaining: 0, next_reset: nr[0].next_reset };
+        }
+        if (count > remaining) {
+          return { error: 'daily_limit', message: `Осталось ${remaining} открытий сегодня`, remaining, used };
+        }
       }
 
       if (totalPrice > 0 && Number(user.balance_nc) < totalPrice) {
         return { error: 'insufficient_nc', message: 'Недостаточно NC' };
       }
 
-      const { rows: caseItems } = await client.query(
+      let { rows: caseItems } = await client.query(
         `SELECT ci.item_id, ci.drop_chance, it.name, it.price_coins, it.rarity, it.collection, it.image_asset, it.image_url
            FROM case_items ci JOIN items it ON it.id=ci.item_id
           WHERE ci.case_id=$1 ORDER BY ci.drop_chance DESC`,
         [caseId]
       );
       if (!caseItems.length) return { error: 'case_empty', message: 'В кейсе нет предметов' };
+
+      // Ивенты x2/x4 — увеличиваем шанс на крутые призы (глобальные + персональные)
+      try {
+        const ev = await activeEvents();
+        // персональные бусты из Shop
+        const now = new Date();
+        const pX4 = user.boost_x4_until && new Date(user.boost_x4_until) > now;
+        const pX2 = user.boost_x2_until && new Date(user.boost_x2_until) > now;
+        if (pX4) ev.events.find((e) => e.key === 'x4').active = true;
+        else if (pX2) ev.events.find((e) => e.key === 'x2').active = true;
+        const mult = luckMultiplier(ev);
+        if (mult > 1) {
+          caseItems = caseItems.map((it) => {
+            let boost = 1;
+            if (it.rarity === 'legendary') boost = mult === 4 ? 2.5 : 2.0;
+            else if (it.rarity === 'epic') boost = mult === 4 ? 2.0 : 1.6;
+            else if (it.rarity === 'rare') boost = mult === 4 ? 1.5 : 1.3;
+            return { ...it, drop_chance: Number(it.drop_chance) * boost };
+          });
+          // нормализуем к 100%
+          const sum = caseItems.reduce((s, it) => s + Number(it.drop_chance), 0);
+          caseItems = caseItems.map((it) => ({ ...it, drop_chance: (Number(it.drop_chance) / sum) * 100 }));
+        }
+      } catch (_) {}
 
       // списание
       let balanceNc = Number(user.balance_nc);
@@ -161,21 +202,31 @@ casesRouter.post('/:id/open', requireAuth, async (req, res, next) => {
         });
       }
 
+      // для ежедневного — считаем остаток после открытия
+      let dailyMeta = null;
+      if (caseId === 'case_daily') {
+        const { rows } = await client.query(`SELECT COUNT(*)::int as cnt FROM case_openings WHERE user_id=$1 AND case_id=$2 AND created_at >= CURRENT_DATE`, [req.user.id, caseId]);
+        const used = rows[0].cnt;
+        const remaining = Math.max(0, 10 - used);
+        const { rows: nr } = await client.query(`SELECT (CURRENT_DATE + interval '1 day')::timestamptz as next_reset`);
+        dailyMeta = { daily_used: used, daily_remaining: remaining, next_reset: nr[0].next_reset };
+      }
       return {
         won,
         balance_nc: balanceNc,
-        balance_coins: null, // клиент возьмет из /api/me если нужно
+        balance_coins: null,
         price_paid: totalPrice,
+        ...(dailyMeta || {}),
       };
     });
 
     if (result.error === 'case_not_found') return res.status(404).json({ error: 'case_not_found', message: 'Кейс не найден' });
     if (result.error === 'case_empty') return res.status(400).json({ error: 'case_empty', message: 'Кейс пуст' });
     if (result.error === 'insufficient_nc') return res.status(400).json({ error: 'insufficient_nc', message: result.message });
-    if (result.error === 'daily_limit') return res.status(400).json({ error: 'daily_limit', message: result.message });
-    if (result.error === 'daily_single') return res.status(400).json({ error: 'daily_single', message: result.message });
+    if (result.error === 'daily_limit') return res.status(400).json(result);
     if (result.error) return res.status(400).json(result);
 
+    try { await incDailyProgress(req.user.id, 'case_open', result.won.length); } catch (_) {}
     res.json(result);
   } catch (err) {
     next(err);

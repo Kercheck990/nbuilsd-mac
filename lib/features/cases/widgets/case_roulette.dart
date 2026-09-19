@@ -28,30 +28,23 @@ class _CaseRouletteState extends State<CaseRoulette> with SingleTickerProviderSt
     super.initState();
     _buildStrip();
     _c = AnimationController(vsync: this, duration: widget.duration);
-    // финальный оффсет: выигранный элемент под стрелкой (центр)
-    final winIndex = _strip.length - 7; // 7 элементов до конца оставим
-    // центр экрана = ширина/2, нужно чтобы левый край выигранного был в центре - itemW/2
-    // но мы не знаем ширину экрана в initState — посчитаем после лэйаута в didChangeDependencies
+    final winIndex = _strip.length - 6;
     _finalOffset = -(winIndex * (itemW + gap));
-    // добавим рандом +- 20% ширины предмета для непредсказуемости
-    final rnd = Random().nextDouble() * 18 - 9;
+    final rnd = Random().nextDouble() * 12 - 6;
     _finalOffset += rnd;
-
     _anim = Tween<double>(begin: 0, end: 1).animate(CurvedAnimation(parent: _c, curve: Curves.easeOutCubic));
     _c.addStatusListener((s) {
       if (s == AnimationStatus.completed) widget.onFinished?.call();
     });
-    // чуть задержки старта чтобы выглядело живее
-    Future.delayed(Duration(milliseconds: Random().nextInt(180)), () {
+    Future.delayed(Duration(milliseconds: Random().nextInt(80)), () {
       if (mounted) _c.forward();
     });
   }
 
   void _buildStrip() {
     final rnd = Random();
-    // 40 элементов ленты
-    _strip = List.generate(40, (_) {
-      // взвешенный рандом по шансам
+    // Оптимизировано для ПК: 30 элементов вместо 40 — меньше Image.asset для декода
+    _strip = List.generate(30, (_) {
       final roll = rnd.nextDouble() * 100;
       double acc = 0;
       for (final it in widget.itemsPool) {
@@ -60,10 +53,8 @@ class _CaseRouletteState extends State<CaseRoulette> with SingleTickerProviderSt
       }
       return widget.itemsPool.last;
     });
-    // вставляем выигранный на позицию winIndex
-    final winIndex = _strip.length - 7;
+    final winIndex = _strip.length - 6;
     _strip[winIndex] = widget.won;
-    // также вокруг win ставим рандом чтобы не было повторов подряд
   }
 
   @override
@@ -76,36 +67,34 @@ class _CaseRouletteState extends State<CaseRoulette> with SingleTickerProviderSt
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, constraints) {
       final center = constraints.maxWidth / 2;
-      // корректируем финальный оффсет с учетом центра
-      final winIndex = _strip.length - 7;
+      final winIndex = _strip.length - 6;
       final target = -(winIndex * (itemW + gap)) + center - itemW / 2;
-      // пересоздаем анимацию если target отличается (первый билд)
       if ((_finalOffset - target).abs() > 1) {
         _finalOffset = target;
       }
-      return Container(
-        height: 118,
-        decoration: BoxDecoration(
-          color: const Color(0xFF0F0F0F),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white10),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Stack(
-          children: [
-            AnimatedBuilder(
-              animation: _anim,
-              builder: (_, __) {
-                // добавляем стартовый разгон: начинаем с быстрого смещения
-                final offset = _finalOffset * _anim.value;
-                return Transform.translate(
-                  offset: Offset(offset, 0),
-                  child: Row(
-                    children: _strip.map((it) => _RouletteTile(item: it)).toList(),
-                  ),
-                );
-              },
-            ),
+      return RepaintBoundary(
+        child: Container(
+          height: 118,
+          decoration: BoxDecoration(
+            color: const Color(0xFF0F0F0F),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.white10),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Stack(
+            children: [
+              AnimatedBuilder(
+                animation: _anim,
+                builder: (_, __) {
+                  final offset = _finalOffset * _anim.value;
+                  return Transform.translate(
+                    offset: Offset(offset, 0),
+                    child: Row(
+                      children: _strip.map((it) => _RouletteTile(item: it)).toList(),
+                    ),
+                  );
+                },
+              ),
             // центральная стрелка
             Align(
               alignment: Alignment.center,
@@ -144,6 +133,7 @@ class _CaseRouletteState extends State<CaseRoulette> with SingleTickerProviderSt
             Positioned(right: 0, top: 0, bottom: 0, child: Container(width: 24, decoration: BoxDecoration(gradient: LinearGradient(colors: [const Color(0xFF0F0F0F).withOpacity(0), const Color(0xFF0F0F0F)])))),
           ],
         ),
+      ),
       );
     });
   }

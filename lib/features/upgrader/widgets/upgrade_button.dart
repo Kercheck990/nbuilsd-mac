@@ -23,14 +23,12 @@ class UpgradeButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final isSpinning = status == UpgradeStatus.spinning;
     final l10n = context.l10n;
+    // Убрано "Не повезло" с кнопки — результат показывается сверху после звука
     final label = blockedByLimit
         ? l10n.t('upgrade_blocked_max')
-        : switch (status) {
-            UpgradeStatus.idle => l10n.t('upgrade_button'),
-            UpgradeStatus.spinning => l10n.t('upgrade_spinning'),
-            UpgradeStatus.success => l10n.t('upgrade_success'),
-            UpgradeStatus.failure => l10n.t('upgrade_failure'),
-          };
+        : isSpinning
+            ? l10n.t('upgrade_spinning')
+            : l10n.t('upgrade_button');
     final enabled = canUpgrade && !isSpinning;
 
     return SizedBox(
@@ -86,6 +84,7 @@ class UpgradeButton extends StatelessWidget {
                       fontWeight: FontWeight.w800,
                       fontSize: 16,
                       color: Colors.black87,
+                      decoration: TextDecoration.none,
                     ),
                   ),
                 ],

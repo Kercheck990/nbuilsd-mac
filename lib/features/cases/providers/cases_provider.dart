@@ -26,9 +26,12 @@ class CaseDetailState {
   final List<CaseItemModel> items;
   final bool loading;
   final String? error;
-  const CaseDetailState({this.info, this.items = const [], this.loading = false, this.error});
-  CaseDetailState copyWith({CaseModel? info, List<CaseItemModel>? items, bool? loading, String? error}) =>
-      CaseDetailState(info: info ?? this.info, items: items ?? this.items, loading: loading ?? this.loading, error: error);
+  final int dailyUsed;
+  final int dailyRemaining;
+  final DateTime? dailyNextReset;
+  const CaseDetailState({this.info, this.items = const [], this.loading = false, this.error, this.dailyUsed = 0, this.dailyRemaining = 10, this.dailyNextReset});
+  CaseDetailState copyWith({CaseModel? info, List<CaseItemModel>? items, bool? loading, String? error, int? dailyUsed, int? dailyRemaining, DateTime? dailyNextReset}) =>
+      CaseDetailState(info: info ?? this.info, items: items ?? this.items, loading: loading ?? this.loading, error: error, dailyUsed: dailyUsed ?? this.dailyUsed, dailyRemaining: dailyRemaining ?? this.dailyRemaining, dailyNextReset: dailyNextReset ?? this.dailyNextReset);
 }
 
 final caseDetailProvider = StateNotifierProvider.family<CaseDetailNotifier, CaseDetailState, String>((ref, caseId) => CaseDetailNotifier(caseId));
@@ -46,7 +49,15 @@ class CaseDetailNotifier extends StateNotifier<CaseDetailState> {
       final c = CaseModel.fromJson((caseJson as Map).cast<String, dynamic>());
       final itemsRaw = res['items'] as List? ?? [];
       final items = itemsRaw.where((e) => e != null).map((e) => CaseItemModel.fromJson((e as Map).cast<String, dynamic>())).toList();
-      state = CaseDetailState(info: c, items: items, loading: false);
+      final daily = res['daily'] as Map?;
+      int used = 0, remaining = 10;
+      DateTime? nextReset;
+      if (daily != null) {
+        used = (daily['used'] as num?)?.toInt() ?? 0;
+        remaining = (daily['remaining'] as num?)?.toInt() ?? (10 - used);
+        nextReset = daily['next_reset'] != null ? DateTime.tryParse(daily['next_reset'].toString()) : null;
+      }
+      state = CaseDetailState(info: c, items: items, loading: false, dailyUsed: used, dailyRemaining: remaining, dailyNextReset: nextReset);
     } catch (e) {
       state = state.copyWith(loading: false, error: e.toString());
     }

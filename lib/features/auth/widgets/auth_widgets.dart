@@ -462,6 +462,8 @@ class OtpInput extends StatefulWidget {
   final ValueChanged<String> onChanged;
   final ValueChanged<String>? onCompleted;
   final bool hasError;
+  final FocusNode? focusNode;
+  final TextEditingController? controller;
 
   const OtpInput({
     super.key,
@@ -469,26 +471,55 @@ class OtpInput extends StatefulWidget {
     required this.onChanged,
     this.onCompleted,
     this.hasError = false,
+    this.focusNode,
+    this.controller,
   });
 
   @override
   State<OtpInput> createState() => _OtpInputState();
 }
 
-class _OtpInputState extends State<OtpInput> {
-  final TextEditingController _controller = TextEditingController();
-  final FocusNode _focus = FocusNode();
+class _OtpInputState extends State<OtpInput> with WidgetsBindingObserver {
+  late final TextEditingController _controller = widget.controller ?? TextEditingController();
+  late final FocusNode _focus = widget.focusNode ?? FocusNode();
+  bool get _isExternalFocus => widget.focusNode != null;
+  bool get _isExternalController => widget.controller != null;
 
   @override
   void initState() {
     super.initState();
-    _focus.requestFocus();
+    WidgetsBinding.instance.addObserver(this);
+    // Request focus after frame to ensure keyboard appears
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focus.requestFocus();
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if ((state == AppLifecycleState.resumed || state == AppLifecycleState.inactive) && mounted) {
+      // When returning from email/sms app, restore focus and keyboard — усиленный фикс для мобилы
+      _focus.unfocus();
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted) _focus.requestFocus();
+      });
+      Future.delayed(const Duration(milliseconds: 350), () {
+        if (mounted) {
+          _focus.requestFocus();
+          SystemChannels.textInput.invokeMethod('TextInput.show');
+        }
+      });
+      Future.delayed(const Duration(milliseconds: 600), () {
+        if (mounted && !_focus.hasFocus) _focus.requestFocus();
+      });
+    }
   }
 
   @override
   void dispose() {
-    _controller.dispose();
-    _focus.dispose();
+    WidgetsBinding.instance.removeObserver(this);
+    if (!_isExternalController) _controller.dispose();
+    if (!_isExternalFocus) _focus.dispose();
     super.dispose();
   }
 
@@ -506,19 +537,28 @@ class _OtpInputState extends State<OtpInput> {
     final text = _controller.text;
     return Stack(
       children: [
-        // Скрытое реальное поле.
+        // Скрытое поле — делаем почти прозрачным но не 0, иначе Android не показывает клавиатуру при возврате из почты
         Opacity(
-          opacity: 0,
+          opacity: 0.01,
           child: SizedBox(
             height: 1,
+            width: 1,
             child: TextField(
               controller: _controller,
               focusNode: _focus,
+              autofocus: true,
               keyboardType: TextInputType.number,
               maxLength: widget.length,
               autofillHints: const [AutofillHints.oneTimeCode],
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              enableSuggestions: false,
+              autocorrect: false,
+              enableInteractiveSelection: false,
+              showCursor: false,
+              style: const TextStyle(color: Colors.transparent, fontSize: 1),
+              decoration: const InputDecoration(border: InputBorder.none, counterText: ''),
               onChanged: _onChanged,
+              onTapOutside: (_) => _focus.requestFocus(),
             ),
           ),
         ),

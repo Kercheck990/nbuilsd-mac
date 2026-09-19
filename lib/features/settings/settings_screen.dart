@@ -1,9 +1,9 @@
 import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:window_manager/window_manager.dart';
 import '../../main.dart';
 
 import '../../core/theme/app_colors.dart';
@@ -60,6 +60,8 @@ class SettingsScreen extends ConsumerWidget {
                         ),
                       ),
                       const SizedBox(height: 14),
+                      EntranceAnim(index: 0, child: _AvatarPicker()),
+                      const SizedBox(height: 14),
                       EntranceAnim(
                         index: 1,
                         child: _NicknameCard(current: user.displayName),
@@ -83,6 +85,8 @@ class SettingsScreen extends ConsumerWidget {
                                     .read(themeModeProvider.notifier)
                                     .setMode(m),
                               ),
+                              const SizedBox(height: 10),
+                              _AppThemePicker(),
                               const SizedBox(height: 6),
                               _AnimatedThemePreview(isDark: isDark),
                             ],
@@ -760,6 +764,42 @@ class _SectionCard extends StatelessWidget {
   }
 }
 
+class _AppThemePicker extends ConsumerWidget {
+  const _AppThemePicker({super.key});
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cur = ref.watch(appThemeProvider);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    Widget chip(AppThemeId id, String label, Color color) {
+      final sel = cur == id;
+      return GestureDetector(
+        onTap: () => ref.read(appThemeProvider.notifier).setTheme(id),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: sel ? color.withOpacity(0.18) : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: sel ? color : (isDark ? Colors.white12 : const Color(0xFFE3E8E3))),
+          ),
+          child: Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: sel ? color : Colors.grey)),
+        ),
+      );
+    }
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Темы', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+      const SizedBox(height: 8),
+      Wrap(spacing: 8, runSpacing: 8, children: [
+        chip(AppThemeId.dark, 'Тёмная', AppColors.brandNeon),
+        chip(AppThemeId.light, 'Светлая', AppColors.brandGreenDeep),
+        chip(AppThemeId.darkOrange, 'Тёмно-оранжевая', AppColors.darkOrangeAccent),
+        chip(AppThemeId.darkBlue, 'Тёмно-синяя', AppColors.darkBlueAccent),
+      ]),
+    ]);
+  }
+}
+
 class _ThemeSegmented extends StatelessWidget {
   final ThemeMode current;
   final ValueChanged<ThemeMode> onPick;
@@ -1114,6 +1154,92 @@ class _LangRow extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _AvatarPicker extends ConsumerStatefulWidget {
+  const _AvatarPicker();
+  @override
+  ConsumerState<_AvatarPicker> createState() => _AvatarPickerState();
+}
+
+class _AvatarPickerState extends ConsumerState<_AvatarPicker> {
+  List<String> _avatars = [];
+  @override
+  void initState() {
+    super.initState();
+    _loadAvatars();
+  }
+
+  Future<void> _loadAvatars() async {
+    try {
+      // Flutter 3.22+: AssetManifest.json deprecated, используем rootBundle + AssetManifest
+      final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+      final avatars = manifest.listAssets().where((k) => k.startsWith('assets/avatar/') && (k.endsWith('.png') || k.endsWith('.jpg') || k.endsWith('.jpeg'))).toList()..sort();
+      if (avatars.isNotEmpty) {
+        if (mounted) setState(() => _avatars = avatars);
+        return;
+      }
+    } catch (_) {}
+    // Fallback: пробуем старый AssetManifest.json
+    try {
+      final String manifestContent = await rootBundle.loadString('AssetManifest.json');
+      final RegExp reg = RegExp(r'"assets\/avatar\/[^"]+\.(png|jpg|jpeg)"');
+      final matches = reg.allMatches(manifestContent).map((m) => m.group(0)!.replaceAll('"', '')).toList();
+      if (matches.isNotEmpty) {
+        if (mounted) setState(() => _avatars = matches);
+        return;
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _avatars = ['assets/avatar/avatar1.png','assets/avatar/avatar2.png','assets/avatar/avatar3.png','assets/avatar/avatar4.png','assets/avatar/avatar5.png','assets/avatar/avatar6.png']);
+  }
+
+  Future<void> _pick(String asset) async {
+    try {
+      await ApiClient.instance.updateMe(avatarUrl: asset);
+      ref.read(userProvider.notifier).setUser(ref.read(userProvider).copyWith(avatarUrl: asset));
+      if (mounted) TopNotify.show(context, 'Аватар обновлён ✅', success: true);
+    } catch (e) {
+      if (mounted) TopNotify.show(context, 'Не удалось сохранить', success: false);
+    }
+  }
+
+  Future<void> _clear() async {
+    try {
+      await ApiClient.instance.updateMe(avatarUrl: '');
+      ref.read(userProvider.notifier).setUser(ref.read(userProvider).copyWith(avatarUrl: null));
+      if (mounted) TopNotify.show(context, 'Аватар сброшен — показывается буква', success: true);
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = ref.watch(userProvider);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return BrandCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [const Text('🖼️', style: TextStyle(fontSize: 18)), const SizedBox(width: 8), const Text('Аватар', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)), const Spacer(), TextButton(onPressed: _clear, child: const Text('Буква'))]),
+        const SizedBox(height: 10),
+        if (_avatars.isEmpty)
+          const Center(child: Padding(padding: EdgeInsets.all(12), child: Text('Нет аватарок — добавь файлы в assets/avatar', style: TextStyle(color: Colors.grey, fontSize: 12))))
+        else
+          Wrap(spacing: 10, runSpacing: 10, children: [
+            for (final a in _avatars)
+              GestureDetector(
+                onTap: () => _pick(a),
+                child: Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: user.avatarUrl == a ? (isDark ? AppColors.brandNeon : AppColors.brandGreen) : Colors.white12, width: user.avatarUrl == a ? 2.5 : 1),
+                    image: DecorationImage(image: AssetImage(a), fit: BoxFit.cover),
+                  ),
+                ),
+              ),
+          ]),
+      ]),
     );
   }
 }

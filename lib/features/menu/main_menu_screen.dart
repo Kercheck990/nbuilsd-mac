@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/l10n/app_localizations.dart';
 import '../../core/theme/app_colors.dart';
@@ -13,9 +14,13 @@ class MainMenuScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final width = MediaQuery.of(context).size.width;
-    final isWide = width >= 980;
-    final isTablet = width >= 640 && width < 980;
+    final size = MediaQuery.of(context).size;
+    final width = size.width;
+    final orientation = MediaQuery.of(context).orientation;
+    // На телефоне в горизонтали — даём больше места: считаем tablet
+    final isLandscapePhone = orientation == Orientation.landscape && width >= 480 && width < 980;
+    final isWide = width >= 980 || (orientation == Orientation.landscape && width >= 980);
+    final isTablet = (width >= 640 && width < 980) || isLandscapePhone;
     final l10n = context.l10n;
 
     return Scaffold(
@@ -30,13 +35,95 @@ class MainMenuScreen extends StatelessWidget {
                 ),
               ),
               SliverPadding(
-                padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+                sliver: SliverToBoxAdapter(
+                  child: isWide
+                      ? Row(
+                          children: [
+                            Expanded(
+                              child: BrandCard(
+                                onTap: () => context.push('/daily'),
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                child: Row(children: [
+                                  Container(width: 36, height: 36, decoration: BoxDecoration(color: const Color(0xFF4D9FFF).withOpacity(0.15), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.task_alt_rounded, color: Color(0xFF4D9FFF))),
+                                  const SizedBox(width: 10),
+                                  const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Ежедневные задания', style: TextStyle(fontWeight: FontWeight.w800, decoration: TextDecoration.none)), Text('Выполняй и получай награды', style: TextStyle(fontSize: 11, color: Colors.grey, decoration: TextDecoration.none))])),
+                                  const GreenArrowBtn(size: 28),
+                                ]),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            BrandCard(
+                              onTap: () async {
+                                final uri = Uri.parse('https://t.me/gamenftgrade');
+                                if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+                              },
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              child: Row(children: [
+                                Container(width: 36, height: 36, decoration: BoxDecoration(color: const Color(0xFF2B7FFF).withOpacity(0.15), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.send_rounded, color: Color(0xFF2B7FFF))),
+                                const SizedBox(width: 10),
+                                const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Наш телеграм канал', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, decoration: TextDecoration.none)), Text('t.me/gamenftgrade', style: TextStyle(fontSize: 11, color: Colors.grey, decoration: TextDecoration.none))]),
+                              ]),
+                            ),
+                          ],
+                        )
+                      : Column(
+                          children: [
+                            BrandCard(
+                              onTap: () => context.push('/daily'),
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                              child: Row(children: [
+                                Container(width: 40, height: 40, decoration: BoxDecoration(color: const Color(0xFF4D9FFF).withOpacity(0.15), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.task_alt_rounded, color: Color(0xFF4D9FFF), size: 22)),
+                                const SizedBox(width: 12),
+                                const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Ежедневные задания', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, decoration: TextDecoration.none)), Text('Выполняй задания и забирай награды', style: TextStyle(fontSize: 12, color: Colors.grey, decoration: TextDecoration.none))])),
+                                const GreenArrowBtn(size: 28),
+                              ]),
+                            ),
+                            const SizedBox(height: 10),
+                            BrandCard(
+                              onTap: () async {
+                                final uri = Uri.parse('https://t.me/gamenftgrade');
+                                if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+                              },
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                              child: Row(children: [
+                                Container(width: 40, height: 40, decoration: BoxDecoration(color: const Color(0xFF2B7FFF).withOpacity(0.15), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.send_rounded, color: Color(0xFF2B7FFF), size: 22)),
+                                const SizedBox(width: 12),
+                                const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Наш телеграм канал', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, decoration: TextDecoration.none)), Text('Новости и розыгрыши — t.me/gamenftgrade', style: TextStyle(fontSize: 12, color: Colors.grey, decoration: TextDecoration.none))])),
+                                const Icon(Icons.open_in_new_rounded, size: 18, color: Colors.grey),
+                              ]),
+                            ),
+                          ],
+                        ),
+                ),
+              ),
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
                 sliver: SliverToBoxAdapter(
                   child: isWide
                       ? _WideGrid(context)
                       : isTablet
                           ? _TabletGrid(context)
                           : _MobileGrid(context),
+                ),
+              ),
+              // Индекс — отдельный переход, доступен на всех устройствах
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
+                sliver: SliverToBoxAdapter(
+                  child: EntranceAnim(
+                    index: 8,
+                    child: BrandCard(
+                      onTap: () => context.push('/index'),
+                      padding: const EdgeInsets.all(16),
+                      child: Row(children: [
+                        Container(width: 44, height: 44, decoration: BoxDecoration(color: const Color(0xFF2B7FFF).withOpacity(0.15), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.collections_bookmark_rounded, color: Color(0xFF2B7FFF), size: 22)),
+                        const SizedBox(width: 12),
+                        const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Индекс', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)), Text('Все предметы — открой чтобы увидеть', style: TextStyle(fontSize: 11, color: Colors.grey))])),
+                        const GreenArrowBtn(size: 28),
+                      ]),
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -288,8 +375,29 @@ class _MobileGrid extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(child: small('Ежедневки', 'Задания и награды', 'assets/iconmainmenu/case.png', const Color(0xFF4D9FFF), '/daily', 5)),
+            const SizedBox(width: 14),
+            Expanded(
+              child: EntranceAnim(
+                index: 6,
+                child: _SmallCard(
+                  title: 'Телеграм',
+                  subtitle: 'Наш канал',
+                  art: const _Art(asset: 'assets/iconmainmenu/media.png', glow: Color(0xFF2B7FFF), small: true),
+                  onTap: () async {
+                    final uri = Uri.parse('https://t.me/gamenftgrade');
+                    if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
         EntranceAnim(
-          index: 5,
+          index: 7,
           child: _ShopCard(tall: false, onTap: () => context.push('/shop')),
         ),
       ],

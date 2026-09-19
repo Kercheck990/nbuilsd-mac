@@ -3,6 +3,21 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/constants/app_constants.dart';
 
+enum AppThemeId { dark, light, darkOrange, darkBlue }
+
+extension AppThemeIdX on AppThemeId {
+  String get storageKey => name;
+  String get label {
+    switch (this) {
+      case AppThemeId.dark: return 'Тёмная';
+      case AppThemeId.light: return 'Светлая';
+      case AppThemeId.darkOrange: return 'Тёмно-оранжевая';
+      case AppThemeId.darkBlue: return 'Тёмно-синяя';
+    }
+  }
+  ThemeMode get mode => this == AppThemeId.light ? ThemeMode.light : ThemeMode.dark;
+}
+
 class ThemeModeNotifier extends StateNotifier<ThemeMode> {
   ThemeModeNotifier() : super(ThemeMode.dark) {
     _load();
@@ -34,6 +49,24 @@ final themeModeProvider =
     StateNotifierProvider<ThemeModeNotifier, ThemeMode>((ref) {
   return ThemeModeNotifier();
 });
+
+class AppThemeNotifier extends StateNotifier<AppThemeId> {
+  AppThemeNotifier() : super(AppThemeId.dark) { _load(); }
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString('pref_app_theme');
+    state = AppThemeId.values.firstWhere((e) => e.name == saved, orElse: () => AppThemeId.dark);
+  }
+  Future<void> setTheme(AppThemeId id) async {
+    state = id;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('pref_app_theme', id.name);
+    // sync ThemeMode for MaterialApp
+    final mode = id.mode;
+    prefs.setString(AppConstants.prefThemeMode, mode.name);
+  }
+}
+final appThemeProvider = StateNotifierProvider<AppThemeNotifier, AppThemeId>((ref) => AppThemeNotifier());
 
 /// Sound / music / haptics toggles, persisted the same way.
 class SettingsState {

@@ -246,6 +246,7 @@ tradesRouter.post('/:id/accept', async (req, res, next) => {
         `UPDATE trades SET status = 'accepted', decided_at = now() WHERE id = $1`,
         [trade.id]
       );
+      try { await client.query(`INSERT INTO notifications (user_id, type, title, body) VALUES ($1,'trade','Обмен принят','Игрок принял от вас обмен')`, [trade.from_user]); } catch (_) {}
       return { ok: true };
     });
 
@@ -266,12 +267,16 @@ tradesRouter.post('/:id/accept', async (req, res, next) => {
 /// POST /api/trades/:id/decline — отклонить (получатель).
 tradesRouter.post('/:id/decline', async (req, res, next) => {
   try {
-    const { rowCount } = await query(
+    const { rowCount, rows } = await query(
       `UPDATE trades SET status = 'declined', decided_at = now()
-        WHERE id = $1 AND to_user = $2 AND status = 'pending'`,
+        WHERE id = $1 AND to_user = $2 AND status = 'pending' RETURNING from_user`,
       [req.params.id, req.user.id]
     );
     if (!rowCount) return bad(res, 'not_found', 'Сделка не найдена', 404);
+    try {
+      const fromId = rows[0]?.from_user;
+      if (fromId) await query(`INSERT INTO notifications (user_id, type, title, body) VALUES ($1,'trade','Обмен отклонён','Игрок отклонил ваш обмен')`, [fromId]);
+    } catch (_) {}
     res.json({ ok: true });
   } catch (err) {
     next(err);

@@ -28,10 +28,21 @@ class ProfileWalletScreen extends ConsumerStatefulWidget {
 class _ProfileWalletScreenState extends ConsumerState<ProfileWalletScreen> {
   List<Map<String, dynamic>> _rounds = [];
   bool _loadingRounds = true;
+  List<NftItem> _showcase = [];
   @override
   void initState() {
     super.initState();
     _loadRounds();
+    _loadShowcase();
+  }
+
+  Future<void> _loadShowcase() async {
+    try {
+      final res = await ApiClient.instance.getShowcase();
+      if (!mounted) return;
+      final list = ((res['showcase'] as List?) ?? const []).map((e) => NftItem.fromJson(e as Map<String, dynamic>)).toList();
+      setState(() => _showcase = list);
+    } catch (_) {}
   }
 
   Future<void> _loadRounds() async {
@@ -58,8 +69,7 @@ class _ProfileWalletScreenState extends ConsumerState<ProfileWalletScreen> {
     final l10n = context.l10n;
     final locale = Localizations.localeOf(context).languageCode;
 
-    final showcase = [...inventory]
-      ..sort((a, b) => b.priceInCoins.compareTo(a.priceInCoins));
+    final showcase = _showcase.isNotEmpty ? _showcase : [...inventory]..sort((a, b) => b.priceInCoins.compareTo(a.priceInCoins));
     final wins = _rounds.where((r) => r['success'] == true).length;
 
     return Scaffold(
@@ -102,26 +112,24 @@ class _ProfileWalletScreenState extends ConsumerState<ProfileWalletScreen> {
                                       ),
                                     ),
                                   ),
-                                  CircleAvatar(
-                                    radius: 36,
-                                    backgroundColor: green.withOpacity(0.14),
-                                    backgroundImage: user.avatarUrl != null
-                                        ? NetworkImage(user.avatarUrl!)
-                                        : null,
-                                    child: user.avatarUrl == null
-                                        ? Text(
-                                            user.displayName.isEmpty
-                                                ? '?'
-                                                : user.displayName.characters.first
-                                                    .toUpperCase(),
-                                            style: TextStyle(
-                                              fontSize: 30,
-                                              fontWeight: FontWeight.w900,
-                                              color: green,
-                                            ),
-                                          )
-                                        : null,
-                                  ),
+                                  Builder(builder: (_) {
+                                    ImageProvider? avatarImage;
+                                    if (user.avatarUrl != null && user.avatarUrl!.isNotEmpty) {
+                                      final url = user.avatarUrl!;
+                                      avatarImage = url.startsWith('assets/') ? AssetImage(url) as ImageProvider : NetworkImage(url) as ImageProvider;
+                                    }
+                                    return CircleAvatar(
+                                      radius: 36,
+                                      backgroundColor: green.withOpacity(0.14),
+                                      backgroundImage: avatarImage,
+                                      child: avatarImage == null
+                                          ? Text(
+                                              user.displayName.isEmpty ? '?' : user.displayName.characters.first.toUpperCase(),
+                                              style: TextStyle(fontSize: 30, fontWeight: FontWeight.w900, color: green),
+                                            )
+                                          : null,
+                                    );
+                                  }),
                                 ],
                               ),
                               const SizedBox(height: 10),

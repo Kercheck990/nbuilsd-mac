@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/widgets/top_notify.dart';
 
@@ -20,16 +21,40 @@ class VerifyCodeScreen extends ConsumerStatefulWidget {
   ConsumerState<VerifyCodeScreen> createState() => _VerifyCodeScreenState();
 }
 
-class _VerifyCodeScreenState extends ConsumerState<VerifyCodeScreen> {
+class _VerifyCodeScreenState extends ConsumerState<VerifyCodeScreen> with WidgetsBindingObserver {
   String _code = '';
   int _shake = 0;
   int _resendIn = 60;
   Timer? _timer;
+  final FocusNode _otpFocus = FocusNode();
+  final TextEditingController _otpController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _startTimer();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _otpFocus.requestFocus();
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if ((state == AppLifecycleState.resumed || state == AppLifecycleState.inactive) && mounted) {
+      Future.delayed(const Duration(milliseconds: 250), () {
+        if (mounted) {
+          _otpFocus.requestFocus();
+          SystemChannels.textInput.invokeMethod('TextInput.show');
+        }
+      });
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted && !_otpFocus.hasFocus) {
+          _otpFocus.requestFocus();
+          SystemChannels.textInput.invokeMethod('TextInput.show');
+        }
+      });
+    }
   }
 
   void _startTimer() {
@@ -44,7 +69,10 @@ class _VerifyCodeScreenState extends ConsumerState<VerifyCodeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
+    _otpFocus.dispose();
+    _otpController.dispose();
     super.dispose();
   }
 
@@ -110,6 +138,8 @@ class _VerifyCodeScreenState extends ConsumerState<VerifyCodeScreen> {
                               ),
                               const SizedBox(height: 26),
                               OtpInput(
+                                controller: _otpController,
+                                focusNode: _otpFocus,
                                 hasError: auth.errorCode == 'verify_err_code',
                                 onChanged: (v) {
                                   _code = v;

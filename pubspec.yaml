@@ -42,6 +42,9 @@ dependencies:
   # Окно и полноэкранный режим (Windows)
   window_manager: ^0.3.8
 
+  # Выбор файлов (загрузка музыки в админке)
+  file_picker: ^10.1.9
+
   # Утилиты
   intl: 0.20.3
   crypto: ^3.0.3
@@ -63,6 +66,7 @@ flutter:
     # Папка подарков подключена целиком: достаточно положить файл в
     # assets/gifts/ и перезапустить приложение.
     - assets/gifts/
+    - assets/avatar/
     - assets/case/
     - assets/abuse/
     - assets/sounds/
@@ -71,6 +75,7 @@ flutter:
     # Логотип приложения (экраны входа, регистрации, сплэш).
     # Основной файл — nftgradelogo.png, запасной — logonftgrade.png.
     - assets/logonftgrade.png
+    - assets/strelka.png
     # Положите файл assets/nftgradelogo.png и раскомментируйте строку ниже.
     # - assets/nftgradelogo.png
 

@@ -66,20 +66,57 @@ class AppTheme {
     );
   }
 
+  static ThemeData get darkOrange {
+    final base = ThemeData.dark(useMaterial3: true);
+    return base.copyWith(
+      scaffoldBackgroundColor: AppColors.darkOrangeBgTop,
+      colorScheme: base.colorScheme.copyWith(
+        primary: AppColors.darkOrangeAccent,
+        secondary: AppColors.darkOrangeNeon,
+        surface: AppColors.darkOrangeSurface,
+        error: AppColors.danger,
+      ),
+      textTheme: _textTheme(base.textTheme, Colors.white, const Color(0xFFD4C4B8)),
+      cardTheme: CardThemeData(
+        color: AppColors.darkOrangeCard,
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: BorderSide(color: AppColors.darkOrangeAccent.withOpacity(0.2))),
+      ),
+      dividerColor: AppColors.darkOrangeAccent.withOpacity(0.15),
+    );
+  }
+
+  static ThemeData get darkBlue {
+    final base = ThemeData.dark(useMaterial3: true);
+    return base.copyWith(
+      scaffoldBackgroundColor: AppColors.darkBlueBgTop,
+      colorScheme: base.colorScheme.copyWith(
+        primary: AppColors.darkBlueAccent,
+        secondary: AppColors.darkBlueNeon,
+        surface: AppColors.darkBlueSurface,
+        error: AppColors.danger,
+      ),
+      textTheme: _textTheme(base.textTheme, Colors.white, const Color(0xFFB8C4D8)),
+      cardTheme: CardThemeData(
+        color: AppColors.darkBlueCard,
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: BorderSide(color: AppColors.darkBlueAccent.withOpacity(0.2))),
+      ),
+      dividerColor: AppColors.darkBlueAccent.withOpacity(0.15),
+    );
+  }
+
   static TextTheme _textTheme(TextTheme base, Color primary, Color secondary) {
+    // Убраны жёлтые полоски под текстом — везде decoration none, иначе на ПК билде появляется underline из-за темы
     return base
         .copyWith(
-          displayLarge: base.displayLarge
-              ?.copyWith(fontWeight: FontWeight.w800, color: primary),
-          headlineMedium: base.headlineMedium
-              ?.copyWith(fontWeight: FontWeight.w800, color: primary),
-          titleLarge: base.titleLarge
-              ?.copyWith(fontWeight: FontWeight.w700, color: primary),
-          titleMedium: base.titleMedium
-              ?.copyWith(fontWeight: FontWeight.w700, color: primary),
-          bodyLarge: base.bodyLarge?.copyWith(color: primary),
-          bodyMedium: base.bodyMedium?.copyWith(color: secondary),
-          labelSmall: base.labelSmall?.copyWith(color: secondary),
+          displayLarge: base.displayLarge?.copyWith(fontWeight: FontWeight.w800, color: primary, decoration: TextDecoration.none),
+          headlineMedium: base.headlineMedium?.copyWith(fontWeight: FontWeight.w800, color: primary, decoration: TextDecoration.none),
+          titleLarge: base.titleLarge?.copyWith(fontWeight: FontWeight.w700, color: primary, decoration: TextDecoration.none),
+          titleMedium: base.titleMedium?.copyWith(fontWeight: FontWeight.w700, color: primary, decoration: TextDecoration.none),
+          bodyLarge: base.bodyLarge?.copyWith(color: primary, decoration: TextDecoration.none),
+          bodyMedium: base.bodyMedium?.copyWith(color: secondary, decoration: TextDecoration.none),
+          labelSmall: base.labelSmall?.copyWith(color: secondary, decoration: TextDecoration.none),
         )
         .apply(fontFamily: fontFamily);
   }

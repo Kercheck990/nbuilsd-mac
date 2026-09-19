@@ -5,30 +5,19 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/l10n/app_localizations.dart';
 import '../../../core/theme/app_colors.dart';
 
-/// Круглая шкала шанса.
+/// Полный круг 360° — честный индикатор шанса.
 ///
-/// ГЛАВНОЕ ПРАВИЛО ЗАПОЛНЕНИЯ:
-/// дуга заполняется РОВНО по проценту — 50% шанса = ровно половина
-/// сектора, 75% = три четверти. Участок от 75% до 100% нарисован как
-/// «запретная зона» (красная штриховка): апгрейд туда невозможен,
-/// потолок задан в [AppConstants.maxChancePercent] = 75.
-///
-/// Во время прокрутки поверх шкалы бежит жёлтая точка — она
-/// останавливается на позиции реального ролла, пришедшего с сервера.
-/// Если точка встала внутри залитой части — победа.
+/// - Серый фон — полный круг (0..100%).
+/// - Зелёный сектор от верха по часовой = шанс (max 75% => 270°).
+/// - Оставшаяся дуга (25% = 90° внизу) — тёмная зона проигрыша.
+/// - Стрелка strelka.png вращается снаружи и указывает на rollPercent.
+///   Попала в зелёный — апгрейд, за зелёным — удаление NFT (сервер решает).
 class GaugeIndicator extends StatelessWidget {
-  /// Текущий шанс 0..100 (уже с учётом потолка).
   final double chancePercent;
-
-  /// Угол бегающей точки во время прокрутки (градусы).
   final double? spinAngleOverrideDeg;
   final bool isSpinning;
   final bool showBrandIcon;
-
-  /// true, если связка ставка/цель даёт больше 75%: шкала подсвечивает
-  /// запретную зону, кнопка апгрейда блокируется.
   final bool overMaxLimit;
-
   final double size;
 
   const GaugeIndicator({
@@ -41,7 +30,6 @@ class GaugeIndicator extends StatelessWidget {
     this.size = 260,
   });
 
-  /// Процент → угол на шкале. 0% — начало дуги, 100% — конец.
   static double angleForPercent(double percent) {
     final p = (percent / AppConstants.gaugeScaleMax).clamp(0.0, 1.0);
     return AppConstants.gaugeStartAngleDeg + AppConstants.gaugeSweepAngleDeg * p;
@@ -54,20 +42,23 @@ class GaugeIndicator extends StatelessWidget {
     return 'gauge_high';
   }
 
-  /// Цвет полосы: чем выше шанс, тем зеленее.
   static Color bandColor(double percent) {
-    final stops = AppColors.gaugeGradient; // [красный … зелёный]
+    final stops = AppColors.gaugeGradient;
     final t = (percent / 100).clamp(0.0, 1.0);
     final scaled = t * (stops.length - 1);
     final i = scaled.floor().clamp(0, stops.length - 2);
     return Color.lerp(stops[i], stops[i + 1], scaled - i)!;
   }
 
+  static Color get winZoneColor => const Color(0xFF2B7FFF);
+  static Color get winZoneGlow => const Color(0xFF4D9FFF);
+
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final color = overMaxLimit ? AppColors.danger : bandColor(chancePercent);
+    final labelColor = overMaxLimit ? AppColors.danger : const Color(0xFF2B7FFF);
+    final glowColor = overMaxLimit ? AppColors.danger : const Color(0xFF4D9FFF);
 
     return SizedBox(
       width: size,
@@ -75,93 +66,128 @@ class GaugeIndicator extends StatelessWidget {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          // Анимируем саму заливку, чтобы при смене ставки/цели дуга
-          // плавно доезжала до нового процента.
-          TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0, end: chancePercent.clamp(0, 100)),
-            duration: const Duration(milliseconds: 450),
-            curve: Curves.easeOutCubic,
-            builder: (context, animatedPercent, _) {
-              return CustomPaint(
-                size: Size(size, size),
-                painter: _GaugePainter(
-                  fillPercent: animatedPercent,
-                  spinAngleDeg: spinAngleOverrideDeg,
-                  isDark: isDark,
-                  isSpinning: isSpinning,
-                  overMaxLimit: overMaxLimit,
-                ),
-              );
-            },
+          RepaintBoundary(
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: chancePercent.clamp(0, 100)),
+              duration: const Duration(milliseconds: 450),
+              curve: Curves.easeOutCubic,
+              builder: (context, animatedPercent, _) {
+                return CustomPaint(
+                  size: Size(size, size),
+                  painter: _GaugePainter(
+                    fillPercent: animatedPercent,
+                    spinAngleDeg: null,
+                    isDark: isDark,
+                    isSpinning: isSpinning,
+                    overMaxLimit: overMaxLimit,
+                  ),
+                );
+              },
+            ),
           ),
-
-          // Внутренний круг
+          // Внутренний круг — чёрный/тёмный с тонкой рамкой
           Container(
-            width: size * 0.70,
-            height: size * 0.70,
+            width: size * 0.62,
+            height: size * 0.62,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: isDark ? AppColors.darkInnerCircle : Colors.white,
+              color: isDark ? const Color(0xFF0F0F0F) : Colors.white,
+              border: Border.all(color: (isDark ? Colors.white : Colors.black).withOpacity(0.06), width: 1),
               boxShadow: [
                 BoxShadow(
-                  color: color.withOpacity(isDark ? 0.18 : 0.10),
-                  blurRadius: 30,
+                  color: glowColor.withOpacity(isDark ? 0.12 : 0.08),
+                  blurRadius: 18,
                   spreadRadius: -4,
                 ),
                 BoxShadow(
-                  color: Colors.black.withOpacity(isDark ? 0.5 : 0.06),
-                  blurRadius: 24,
-                  spreadRadius: -6,
+                  color: Colors.black.withOpacity(isDark ? 0.45 : 0.06),
+                  blurRadius: 20,
+                  spreadRadius: -8,
                 ),
               ],
             ),
           ),
-
+          // Стрелка из assets/strelka.png — вращается по spinAngle (фикc бага: попадание в зелёное засчитывало проигрыш)
+          if (spinAngleOverrideDeg != null)
+            Positioned.fill(
+              child: Transform.rotate(
+                angle: (spinAngleOverrideDeg! + 90) * math.pi / 180,
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: Padding(
+                    padding: EdgeInsets.only(top: size * 0.015),
+                    child: Image.asset(
+                      'assets/strelka.png',
+                      width: size * 0.11,
+                      height: size * 0.11,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) => Container(
+                        width: 14,
+                        height: 14,
+                        decoration: BoxDecoration(
+                          color: AppColors.accentYellow,
+                          shape: BoxShape.circle,
+                          boxShadow: [BoxShadow(color: AppColors.accentYellow.withOpacity(0.6), blurRadius: 12)],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           if (showBrandIcon)
             Icon(
               Icons.keyboard_double_arrow_up_rounded,
-              size: size * 0.26,
+              size: size * 0.24,
               color: AppColors.accentYellow.withOpacity(0.9),
             )
           else
-            Padding(
-              padding: EdgeInsets.symmetric(horizontal: size * 0.14),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TweenAnimationBuilder<double>(
-                    tween: Tween(begin: 0, end: chancePercent),
-                    duration: const Duration(milliseconds: 450),
-                    curve: Curves.easeOutCubic,
-                    builder: (context, value, _) {
-                      return Text(
-                        '${value.toStringAsFixed(0)}%',
-                        style: TextStyle(
-                          fontSize: size * 0.20,
-                          height: 1.05,
-                          fontWeight: FontWeight.w800,
-                          fontFeatures: const [FontFeature.tabularFigures()],
-                          color: overMaxLimit
-                              ? AppColors.danger
-                              : (isDark ? Colors.white : AppColors.lightTextPrimary),
-                        ),
-                      );
-                    },
+            // Центр: большой процент + подпись
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TweenAnimationBuilder<double>(
+                  tween: Tween(begin: 0, end: chancePercent),
+                  duration: const Duration(milliseconds: 450),
+                  curve: Curves.easeOutCubic,
+                  builder: (context, value, _) {
+                    return Text(
+                      '${value.toStringAsFixed(1)}%',
+                      style: TextStyle(
+                        fontSize: size * 0.15,
+                        height: 1.0,
+                        fontWeight: FontWeight.w900,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                        color: overMaxLimit ? AppColors.danger : (isDark ? Colors.white : AppColors.lightTextPrimary),
+                        decoration: TextDecoration.none,
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  overMaxLimit ? l10n.t('gauge_max') : l10n.t(bandKey(chancePercent)),
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  style: TextStyle(
+                    fontSize: size * 0.042,
+                    fontWeight: FontWeight.w700,
+                    color: labelColor,
+                    letterSpacing: 0.2,
+                    decoration: TextDecoration.none,
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    overMaxLimit ? l10n.t('gauge_max') : l10n.t(bandKey(chancePercent)),
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    style: TextStyle(
-                      fontSize: size * 0.05,
-                      fontWeight: FontWeight.w600,
-                      color: color,
-                      letterSpacing: 0.2,
-                    ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  l10n.t('up_chance'),
+                  style: TextStyle(
+                    fontSize: size * 0.032,
+                    fontWeight: FontWeight.w500,
+                    color: (isDark ? Colors.white38 : const Color(0xFF8A94A6)),
+                    decoration: TextDecoration.none,
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
         ],
       ),
@@ -189,14 +215,14 @@ class _GaugePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width / 2 - 22;
+    final radius = size.width / 2 - 16;
     final rect = Rect.fromCircle(center: center, radius: radius);
 
     final startAngle = _deg2rad(AppConstants.gaugeStartAngleDeg);
     final fullSweep = _deg2rad(AppConstants.gaugeSweepAngleDeg);
-    const strokeWidth = 18.0;
+    const strokeWidth = 16.0;
 
-    // ---- 1. Фоновая дорожка (вся шкала 0..100%) --------------------
+    // ---- 1. Фон — полный круг тёмный ---------------------------
     canvas.drawArc(
       rect,
       startAngle,
@@ -206,50 +232,26 @@ class _GaugePainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = strokeWidth
         ..strokeCap = StrokeCap.round
-        ..color = (isDark ? Colors.white : Colors.black).withOpacity(0.06),
+        ..color = (isDark ? const Color(0xFF1E2522) : const Color(0xFFE6EADF)),
     );
 
-    // ---- 2. Запретная зона 75..100% --------------------------------
-    final lockFraction = AppConstants.maxChancePercent / AppConstants.gaugeScaleMax;
-    final lockStart = startAngle + fullSweep * lockFraction;
-    final lockSweep = fullSweep * (1 - lockFraction);
-    canvas.drawArc(
-      rect,
-      lockStart,
-      lockSweep,
-      false,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = strokeWidth
-        ..color = AppColors.danger.withOpacity(overMaxLimit ? 0.32 : 0.12),
-    );
-    _paintHatch(canvas, center, radius, lockStart, lockSweep, strokeWidth);
-
-    // ---- 3. Заливка строго по проценту -----------------------------
+    // ---- 2. Синяя зона шанса — от верха по часовой (замена зелёного на синий) ------------
     final fillFraction = (fillPercent / AppConstants.gaugeScaleMax).clamp(0.0, 1.0);
     if (fillFraction > 0.001) {
       final fillSweep = fullSweep * fillFraction;
       final shader = SweepGradient(
         startAngle: startAngle,
-        endAngle: startAngle + fullSweep,
-        colors: AppColors.gaugeGradient,
-        stops: const [0.0, 0.35, 0.65, 1.0],
+        endAngle: startAngle + fillSweep,
+        colors: overMaxLimit
+            ? [AppColors.danger, AppColors.danger.withOpacity(0.9)]
+            : isDark
+                ? [const Color(0xFF1A5CFF), const Color(0xFF4D9FFF)]
+                : [const Color(0xFF2B7FFF), const Color(0xFF1A5CFF)],
+        stops: const [0.0, 1.0],
         transform: GradientRotation(startAngle),
       ).createShader(rect);
 
-      // Мягкое свечение под заливкой.
-      canvas.drawArc(
-        rect,
-        startAngle,
-        fillSweep,
-        false,
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = strokeWidth + 8
-          ..strokeCap = StrokeCap.round
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12)
-          ..shader = shader,
-      );
+      // Убрали тяжёлый blur для перфоманса (был MaskFilter 10)
       canvas.drawArc(
         rect,
         startAngle,
@@ -263,110 +265,95 @@ class _GaugePainter extends CustomPainter {
       );
     }
 
-    // ---- 4. Засечка и подпись на отметке 75% -----------------------
+    // ---- 3. Индикатор 75% — тонкая красная засечка --------------
+    final lockFraction = AppConstants.maxChancePercent / AppConstants.gaugeScaleMax;
     final limitAngle = startAngle + fullSweep * lockFraction;
     canvas.drawLine(
-      Offset(center.dx + (radius - strokeWidth * 0.8) * math.cos(limitAngle),
-          center.dy + (radius - strokeWidth * 0.8) * math.sin(limitAngle)),
-      Offset(center.dx + (radius + strokeWidth * 0.7) * math.cos(limitAngle),
-          center.dy + (radius + strokeWidth * 0.7) * math.sin(limitAngle)),
+      Offset(center.dx + (radius - strokeWidth * 0.55) * math.cos(limitAngle),
+          center.dy + (radius - strokeWidth * 0.55) * math.sin(limitAngle)),
+      Offset(center.dx + (radius + strokeWidth * 0.55) * math.cos(limitAngle),
+          center.dy + (radius + strokeWidth * 0.55) * math.sin(limitAngle)),
       Paint()
-        ..strokeWidth = 3
+        ..strokeWidth = 2.4
         ..strokeCap = StrokeCap.round
         ..color = AppColors.danger.withOpacity(0.9),
     );
-    _paintLabel(canvas, center, radius + 24, limitAngle, '75%');
 
-    // ---- 5. Насечки по ободу ---------------------------------------
+    // Подпись 75% чуть снаружи
+    _paintLabel(canvas, center, radius + 18, limitAngle, '75%', AppColors.danger);
+
+    // ---- 4. Метки процентов по кругу — 0,25,50,75,100 ------------
+    final percentMarks = [0, 25, 50, 75, 100];
+    for (final p in percentMarks) {
+      if (p == 75) continue; // уже нарисовали
+      final ang = startAngle + fullSweep * (p / 100);
+      _paintLabel(canvas, center, radius + 14, ang, '$p%', (isDark ? Colors.white38 : const Color(0xFF8A94A6)));
+    }
+
+    // ---- 5. Мелкие насечки — лёгкие, 40 штук ----------------------
     final tickPaint = Paint()
-      ..strokeWidth = 2
-      ..color = (isDark ? Colors.white : Colors.black).withOpacity(0.16);
-    const tickCount = 20;
-    for (var i = 0; i <= tickCount; i++) {
+      ..strokeWidth = 1.0
+      ..strokeCap = StrokeCap.round
+      ..color = (isDark ? Colors.white : Colors.black).withOpacity(0.08);
+    const tickCount = 40;
+    for (var i = 0; i < tickCount; i++) {
       final angle = startAngle + fullSweep * (i / tickCount);
+      // пропускаем крупные метки
+      if (i % 10 == 0) continue;
+      final len = 3.0;
+      final off = 11.0;
       canvas.drawLine(
-        Offset(center.dx + (radius + 12) * math.cos(angle),
-            center.dy + (radius + 12) * math.sin(angle)),
-        Offset(center.dx + (radius + 17) * math.cos(angle),
-            center.dy + (radius + 17) * math.sin(angle)),
+        Offset(center.dx + (radius + off) * math.cos(angle), center.dy + (radius + off) * math.sin(angle)),
+        Offset(center.dx + (radius + off + len) * math.cos(angle), center.dy + (radius + off + len) * math.sin(angle)),
         tickPaint,
       );
     }
+    // Крупные насечки на 0,25,50,75,100
+    final majorPaint = Paint()
+      ..strokeWidth = 1.6
+      ..strokeCap = StrokeCap.round
+      ..color = (isDark ? Colors.white : Colors.black).withOpacity(0.14);
+    for (final p in percentMarks) {
+      final ang = startAngle + fullSweep * (p / 100);
+      canvas.drawLine(
+        Offset(center.dx + (radius + 10) * math.cos(ang), center.dy + (radius + 10) * math.sin(ang)),
+        Offset(center.dx + (radius + 15) * math.cos(ang), center.dy + (radius + 15) * math.sin(ang)),
+        majorPaint,
+      );
+    }
 
-    // ---- 6. Маркер края заливки ------------------------------------
-    final edgeAngle = startAngle + fullSweep * fillFraction;
-    _paintDot(canvas, center, radius, edgeAngle,
-        color: overMaxLimit ? AppColors.danger : Colors.white, r: 5.5, glow: 7);
-
-    // ---- 7. Бегущая точка ролла ------------------------------------
-    if (spinAngleDeg != null) {
-      _paintDot(canvas, center, radius, _deg2rad(spinAngleDeg!),
-          color: AppColors.accentYellow, r: isSpinning ? 7 : 6, glow: 12);
+    // ---- 6. Точка на краю синей зоны — без blur для перфоманса ---
+    if (fillFraction > 0.001 && fillFraction < 0.999) {
+      final edgeAngle = startAngle + fullSweep * fillFraction;
+      _paintDot(canvas, center, radius, edgeAngle,
+          color: overMaxLimit ? AppColors.danger : const Color(0xFF4D9FFF), r: 4.5);
     }
   }
 
   void _paintDot(Canvas canvas, Offset center, double radius, double angle,
-      {required Color color, required double r, required double glow}) {
-    final pos = Offset(
-      center.dx + radius * math.cos(angle),
-      center.dy + radius * math.sin(angle),
-    );
-    canvas.drawCircle(
-      pos,
-      r + 3,
-      Paint()
-        ..color = color.withOpacity(0.85)
-        ..maskFilter = MaskFilter.blur(BlurStyle.normal, glow),
-    );
+      {required Color color, required double r}) {
+    final pos = Offset(center.dx + radius * math.cos(angle), center.dy + radius * math.sin(angle));
+    // без blur — быстрее
+    canvas.drawCircle(pos, r + 2, Paint()..color = color.withOpacity(0.25));
     canvas.drawCircle(pos, r, Paint()..color = color);
+    canvas.drawCircle(pos, r - 2, Paint()..color = Colors.white.withOpacity(0.9));
   }
 
-  void _paintHatch(Canvas canvas, Offset center, double radius, double start,
-      double sweep, double strokeWidth) {
-    final paint = Paint()
-      ..strokeWidth = 1.4
-      ..color = AppColors.danger.withOpacity(overMaxLimit ? 0.55 : 0.22);
-    const steps = 9;
-    for (var i = 0; i <= steps; i++) {
-      final a = start + sweep * (i / steps);
-      canvas.drawLine(
-        Offset(center.dx + (radius - strokeWidth / 2) * math.cos(a),
-            center.dy + (radius - strokeWidth / 2) * math.sin(a)),
-        Offset(center.dx + (radius + strokeWidth / 2) * math.cos(a),
-            center.dy + (radius + strokeWidth / 2) * math.sin(a)),
-        paint,
-      );
-    }
-  }
-
-  void _paintLabel(
-      Canvas canvas, Offset center, double radius, double angle, String text) {
+  void _paintLabel(Canvas canvas, Offset center, double radius, double angle, String text, Color color) {
     final tp = TextPainter(
       text: TextSpan(
         text: text,
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w700,
-          color: AppColors.danger.withOpacity(0.9),
-        ),
+        style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: color, decoration: TextDecoration.none),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
-    tp.paint(
-      canvas,
-      Offset(
-        center.dx + radius * math.cos(angle) - tp.width / 2,
-        center.dy + radius * math.sin(angle) - tp.height / 2,
-      ),
-    );
+    tp.paint(canvas, Offset(center.dx + radius * math.cos(angle) - tp.width / 2, center.dy + radius * math.sin(angle) - tp.height / 2));
   }
 
   @override
   bool shouldRepaint(covariant _GaugePainter old) {
     return old.fillPercent != fillPercent ||
-        old.spinAngleDeg != spinAngleDeg ||
         old.isDark != isDark ||
-        old.isSpinning != isSpinning ||
         old.overMaxLimit != overMaxLimit;
   }
 }

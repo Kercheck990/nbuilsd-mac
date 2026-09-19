@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:audioplayers/audioplayers.dart';
+import 'package:just_audio/just_audio.dart' as ja;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
@@ -75,9 +75,19 @@ class GameEvent {
 class EventsState {
   final List<GameEvent> events;
   final bool weekend;
+  final bool adminAbuse;
+  final DateTime? adminAbuseEndsAt;
+  final DateTime? nextAdminAbuseAt;
   final DateTime? nextWindowAt;
 
-  const EventsState({this.events = const [], this.weekend = false, this.nextWindowAt});
+  const EventsState({
+    this.events = const [],
+    this.weekend = false,
+    this.adminAbuse = false,
+    this.adminAbuseEndsAt,
+    this.nextAdminAbuseAt,
+    this.nextWindowAt,
+  });
 
   bool get x2 => _on('x2');
   bool get x4 => _on('x4');
@@ -111,6 +121,13 @@ class EventsNotifier extends StateNotifier<EventsState> {
       state = EventsState(
         events: list,
         weekend: res['weekend'] as bool? ?? false,
+        adminAbuse: res['admin_abuse'] as bool? ?? false,
+        adminAbuseEndsAt: res['admin_abuse_ends_at'] != null
+            ? DateTime.tryParse(res['admin_abuse_ends_at'].toString())
+            : null,
+        nextAdminAbuseAt: res['next_admin_abuse_at'] != null
+            ? DateTime.tryParse(res['next_admin_abuse_at'].toString())
+            : null,
         nextWindowAt: res['next_window_at'] != null
             ? DateTime.tryParse(res['next_window_at'].toString())
             : null,
@@ -192,7 +209,7 @@ Future<String> _resolveAudioUrl(String raw) async {
 class MusicController extends StateNotifier<bool> {
   MusicController() : super(false);
 
-  final AudioPlayer _player = AudioPlayer();
+  final ja.AudioPlayer _player = ja.AudioPlayer();
   String _rawUrl = '';
   String _resolvedUrl = '';
 
@@ -207,8 +224,9 @@ class MusicController extends StateNotifier<bool> {
     }
     try {
       final resolved = await _resolveAudioUrl(rawUrl.trim());
-      await _player.setReleaseMode(ReleaseMode.loop);
-      await _player.play(UrlSource(resolved));
+      await _player.setLoopMode(ja.LoopMode.one);
+      await _player.setUrl(resolved);
+      await _player.play();
       _rawUrl = rawUrl.trim();
       _resolvedUrl = resolved;
       state = true;
@@ -220,14 +238,14 @@ class MusicController extends StateNotifier<bool> {
   }
 
   Future<void> stopCustom() async {
-    await _player.stop();
+    try { await _player.stop(); } catch (_) {}
     state = false;
     _rawUrl = '';
     _resolvedUrl = '';
   }
 
   Future<void> sync({required String url, required bool serverOn, required bool userOn, String? userUrl}) async {
-    // Приоритет: локальная YouTube-ссылка пользователя, если она задана и музыка включена
+    // Приоритет: локальная YouTube — только у игрока. Админская музыка — для всех, игнор userOn (чтобы у всех играла когда админ включил)
     String effective = '';
     bool want = false;
     final local = userUrl?.trim() ?? '';
@@ -235,7 +253,18 @@ class MusicController extends StateNotifier<bool> {
       effective = local;
       want = true;
     } else {
-      want = serverOn && userOn && url.isNotEmpty;
+      final isYoutubeServer = _extractYoutubeId(url) != null;
+      if (isYoutubeServer) {
+        if (state) {
+          await _player.stop();
+          state = false;
+        }
+        _rawUrl = '';
+        _resolvedUrl = '';
+        return;
+      }
+      // Фикс: админская музыка играет у всех когда serverOn, независимо от личной настройки музыки игрока
+      want = serverOn && url.isNotEmpty;
       effective = url;
     }
     if (!want || effective.isEmpty) {
@@ -249,13 +278,19 @@ class MusicController extends StateNotifier<bool> {
     }
     if (state && _rawUrl == effective) return;
     _rawUrl = effective;
+    String resolved = effective;
     try {
-      final resolved = await _resolveAudioUrl(effective);
+      resolved = local.isNotEmpty && local == effective
+          ? await _resolveAudioUrl(effective)
+          : effective;
       _resolvedUrl = resolved;
-      await _player.setReleaseMode(ReleaseMode.loop);
-      await _player.play(UrlSource(resolved));
+      await _player.setLoopMode(ja.LoopMode.one);
+      await _player.setUrl(resolved);
+      await _player.play();
       state = true;
-    } catch (_) {
+    } catch (e) {
+      // ignore: avoid_print
+      print('Music sync failed $resolved: $e');
       state = false;
     }
   }
@@ -333,15 +368,24 @@ final broadcastsProvider =
 class HeartbeatRunner {
   Timer? _hb;
   Timer? _ev;
+  Timer? _bc;
+  Timer? _notif;
 
   bool get running => _hb != null;
 
   void start(WidgetRef ref) {
     if (running) return;
     _tick(ref); // сразу
+    // Снижена частота опросов для ПК — было каждые 5с, стало 15с (убирает лаги на мощных ПК с частыми перерисовками)
     _hb = Timer.periodic(const Duration(seconds: 60), (_) => _tick(ref));
-    _ev = Timer.periodic(const Duration(seconds: 30), (_) {
+    _ev = Timer.periodic(const Duration(seconds: 15), (_) {
       ref.read(eventsProvider.notifier).refresh();
+    });
+    _bc = Timer.periodic(const Duration(seconds: 15), (_) {
+      ref.read(broadcastsProvider.notifier).refresh();
+    });
+    _notif = Timer.periodic(const Duration(seconds: 30), (_) async {
+      try { await ref.read(eventsProvider.notifier).refresh(); } catch (_) {}
     });
   }
 
@@ -355,6 +399,7 @@ class HeartbeatRunner {
       }
     } catch (_) {}
     await ref.read(eventsProvider.notifier).refresh();
+    await ref.read(broadcastsProvider.notifier).refresh();
     final s = ref.read(appSettingsProvider.notifier);
     await s.refresh();
     final userSettings = ref.read(settingsProvider);
@@ -369,8 +414,12 @@ class HeartbeatRunner {
   void stop() {
     _hb?.cancel();
     _ev?.cancel();
+    _bc?.cancel();
+    _notif?.cancel();
     _hb = null;
     _ev = null;
+    _bc = null;
+    _notif = null;
   }
 }
 

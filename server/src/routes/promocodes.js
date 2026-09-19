@@ -108,3 +108,17 @@ promocodesRouter.post('/admin', requireAuth, requireAdmin, async (req, res, next
     next(err);
   }
 });
+
+/// DELETE /api/promocodes/admin/:code — удалить промокод (админ).
+promocodesRouter.delete('/admin/:code', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const code = String(req.params.code || '').trim().toUpperCase();
+    if (!code) return bad(res, 'no_code', 'Укажите код');
+    await query(`DELETE FROM promocodes WHERE code = $1`, [code]);
+    await query(`DELETE FROM promocode_redemptions WHERE code_id IN (SELECT id FROM promocodes WHERE code = $1)`, [code]);
+    // Если code был PK, redemptions уже удалены каскадом, но на всякий
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});

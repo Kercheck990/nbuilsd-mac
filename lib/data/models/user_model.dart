@@ -16,6 +16,7 @@ class AppUser extends Equatable {
   final bool tfaEnabled;
   final bool telegramLinked;
   final int playtimeSeconds;
+  final bool isBanned;
 
   const AppUser({
     required this.id,
@@ -31,14 +32,16 @@ class AppUser extends Equatable {
     this.tfaEnabled = false,
     this.telegramLinked = false,
     this.playtimeSeconds = 0,
+    this.isBanned = false,
   });
 
   int get playtimeHours => playtimeSeconds ~/ 3600;
 
+  static const _unset = Object();
   AppUser copyWith({
     String? displayName,
     String? email,
-    String? avatarUrl,
+    Object? avatarUrl = _unset,
     int? balanceCoins,
     int? balanceNc,
     String? walletAddress,
@@ -48,12 +51,13 @@ class AppUser extends Equatable {
     bool? tfaEnabled,
     bool? telegramLinked,
     int? playtimeSeconds,
+    bool? isBanned,
   }) {
     return AppUser(
       id: id,
       displayName: displayName ?? this.displayName,
       email: email ?? this.email,
-      avatarUrl: avatarUrl ?? this.avatarUrl,
+      avatarUrl: avatarUrl == _unset ? this.avatarUrl : avatarUrl as String?,
       balanceCoins: balanceCoins ?? this.balanceCoins,
       balanceNc: balanceNc ?? this.balanceNc,
       walletAddress: walletAddress ?? this.walletAddress,
@@ -63,6 +67,7 @@ class AppUser extends Equatable {
       tfaEnabled: tfaEnabled ?? this.tfaEnabled,
       telegramLinked: telegramLinked ?? this.telegramLinked,
       playtimeSeconds: playtimeSeconds ?? this.playtimeSeconds,
+      isBanned: isBanned ?? this.isBanned,
     );
   }
 
@@ -83,6 +88,7 @@ class AppUser extends Equatable {
       tfaEnabled: json['tfa_enabled'] as bool? ?? false,
       telegramLinked: json['telegram_linked'] as bool? ?? false,
       playtimeSeconds: (json['playtime_seconds'] as num?)?.toInt() ?? 0,
+      isBanned: json['is_banned'] as bool? ?? false,
     );
   }
 

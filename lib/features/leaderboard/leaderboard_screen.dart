@@ -69,11 +69,30 @@ final leaderboardProvider =
 });
 
 /// Лидерборды: три реальные категории с сервера, топ-35, без моков.
-class LeaderboardScreen extends ConsumerWidget {
+/// Авто-обновление каждые 5 минут + авто-галочка «Лидер» топ-3.
+class LeaderboardScreen extends ConsumerStatefulWidget {
   const LeaderboardScreen({super.key});
+  @override
+  ConsumerState<LeaderboardScreen> createState() => _LeaderboardScreenState();
+}
+
+class _LeaderboardScreenState extends ConsumerState<LeaderboardScreen> {
+  @override
+  void initState() {
+    super.initState();
+    Future.microtask(() => ref.invalidate(leaderboardProvider));
+    // Авто-обновление каждые 5 минут
+    Future.delayed(const Duration(minutes: 5), _autoRefreshLoop);
+  }
+
+  void _autoRefreshLoop() {
+    if (!mounted) return;
+    ref.invalidate(leaderboardProvider);
+    Future.delayed(const Duration(minutes: 5), _autoRefreshLoop);
+  }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
     final isWide = width >= 980;
     final l10n = context.l10n;
@@ -232,8 +251,6 @@ class _LeaderCard extends StatelessWidget {
               }
               return Column(
                 children: [
-                  if (rows.any((r) => r.isMe && r.rewardGranted))
-                    const _RewardBanner(),
                   for (var i = 0; i < rows.length; i++)
                     _LeaderRowTile(row: rows[i], unit: unit, index: i),
                 ],
@@ -246,35 +263,7 @@ class _LeaderCard extends StatelessWidget {
   }
 }
 
-/// Плашка «топ-3 получил +250» — награда выдаётся сервером один раз.
-class _RewardBanner extends StatelessWidget {
-  const _RewardBanner();
 
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFC107).withOpacity(0.12),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFFFC107).withOpacity(0.5)),
-      ),
-      child: Row(
-        children: [
-          const Text('🏆', style: TextStyle(fontSize: 16)),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              context.l10n.t('lb_reward'),
-              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 class _CardMessage extends StatelessWidget {
   final IconData icon;
@@ -427,11 +416,6 @@ class _LeaderRowTileState extends State<_LeaderRowTile>
                         ),
                       ),
                       UserBadgesRow(badges: row.badges, locale: locale),
-                      if (row.rewardGranted)
-                        const Padding(
-                          padding: EdgeInsets.only(left: 4),
-                          child: Text('🎁', style: TextStyle(fontSize: 13)),
-                        ),
                     ],
                   ),
                 ),

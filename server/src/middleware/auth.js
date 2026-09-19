@@ -55,6 +55,7 @@ export function publicUser(u) {
     balance_nc: Number(u.balance_nc ?? 30),
     email_verified: u.email_verified,
     is_admin: !!u.is_admin,
+    is_banned: !!u.is_banned,
     badges: u.badges || [],
     tfa_enabled: !!u.tfa_enabled,
     telegram_linked: !!u.telegram_id,

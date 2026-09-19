@@ -46,11 +46,12 @@ CREATE TABLE IF NOT EXISTS case_openings (
 CREATE INDEX IF NOT EXISTS idx_case_openings_user ON case_openings(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_case_openings_case ON case_openings(case_id, created_at DESC);
 
--- --- Сиды кейсов (5 штук как в ТЗ) -----------------------------------
+-- --- Сиды кейсов (6 штук: 5 из ТЗ + Milioner) — сохраняет ручные правки цены/содержимого из админки
 INSERT INTO cases (id, name, price_nc, sort_order, image_asset) VALUES
-  ('case_trash',  'Мусор',      0,  1, 'case_trash.png'),
-  ('case_daily',  'Ежедневный', 0,  2, 'case_daily.png'),
-  ('case_mclaren','McLaren',   10,  3, 'case_mclaren.png'),
-  ('case_office', 'Офис',      15,  4, 'case_office.png'),
-  ('case_burzh',  'Бурж',      20,  5, 'case_burzh.png')
-ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, price_nc=EXCLUDED.price_nc, sort_order=EXCLUDED.sort_order;
+  ('case_trash',   'Мусор',      0,  1, 'case_trash.png'),
+  ('case_daily',   'Ежедневный', 0,  2, 'case_daily.png'),
+  ('case_mclaren', 'McLaren',   10,  3, 'case_mclaren.png'),
+  ('case_office',  'Офис',      15,  4, 'case_office.png'),
+  ('case_burzh',   'Бурж',      20,  5, 'case_burzh.png'),
+  ('case_milioner','Milioner',  80,  6, 'milioner.png')
+ON CONFLICT (id) DO NOTHING;

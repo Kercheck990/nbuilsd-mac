@@ -20,11 +20,17 @@ Future<void> main() async {
   await Hive.initFlutter();
   if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
     await windowManager.ensureInitialized();
-    WindowOptions opts = const WindowOptions(size: Size(1280, 720), center: true, title: 'NFT Grade PC Build');
+    // Винда — фулл ХД как просили
+    WindowOptions opts = const WindowOptions(size: Size(1920, 1080), center: true, title: 'NFT Grade PC Build', minimumSize: Size(1280, 720));
     await windowManager.waitUntilReadyToShow(opts, () async {
       await windowManager.show();
       await windowManager.focus();
     });
+  } else {
+    // Мобилки — только альбом (перевёрнутый телефон как на фото 3), оптимизация под горизонтальный геймплей
+    await SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
+    // Иммерсив для большего поля
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   }
   runApp(const ProviderScope(child: NftGraderApp()));
 }
@@ -55,7 +61,10 @@ class NftGraderApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final appThemeId = ref.watch(appThemeProvider);
     final themeMode = ref.watch(themeModeProvider);
+    // fallback sync: if appTheme is orange/blue, override themeMode dark
+    final effectiveMode = appThemeId == AppThemeId.light ? ThemeMode.light : ThemeMode.dark;
     final locale = ref.watch(localeProvider);
     final router = ref.watch(routerProvider);
 
@@ -91,27 +100,48 @@ class NftGraderApp extends ConsumerWidget {
         child: MaterialApp.router(
       title: 'NFT-GRADER',
       debugShowCheckedModeBanner: false,
-      themeMode: themeMode,
-      theme: AppTheme.light,
-      darkTheme: AppTheme.dark,
+      themeMode: effectiveMode,
+      theme: switch (appThemeId) {
+        AppThemeId.darkOrange => AppTheme.darkOrange,
+        AppThemeId.darkBlue => AppTheme.darkBlue,
+        _ => AppTheme.light,
+      },
+      darkTheme: switch (appThemeId) {
+        AppThemeId.darkOrange => AppTheme.darkOrange,
+        AppThemeId.darkBlue => AppTheme.darkBlue,
+        AppThemeId.light => AppTheme.light,
+        _ => AppTheme.dark,
+      },
       routerConfig: router,
       locale: locale,
-      builder: (context, child) => Stack(
-        children: [
-          child ?? const SizedBox.shrink(),
-          // Иконки ивентов слева внизу + баннер рассылок — поверх всех экранов.
-          const Positioned(
-            left: 12,
-            bottom: 12,
-            child: SafeArea(child: EventIcons()),
-          ),
-          const Positioned(
-            top: 64,
-            left: 16,
-            right: 16,
-            child: SafeArea(child: BroadcastBanner()),
-          ),
-        ],
+      builder: (context, child) => DefaultTextStyle(
+        style: const TextStyle(decoration: TextDecoration.none, decorationColor: Colors.transparent),
+        child: Stack(
+          children: [
+            child ?? const SizedBox.shrink(),
+            // Таймер до админ абьюза сверху (как на фото)
+            const Positioned(
+              top: 8,
+              left: 16,
+              right: 16,
+              child: SafeArea(child: Center(child: AdminAbuseCountdown())),
+            ),
+            // Белый флэш + blessing/x2 во время абьюза
+            const Positioned.fill(child: SafeArea(child: AdminAbuseOverlay())),
+            // Иконки ивентов слева внизу + баннер рассылок — поверх всех экранов.
+            const Positioned(
+              left: 12,
+              bottom: 12,
+              child: SafeArea(child: EventIcons()),
+            ),
+            const Positioned(
+              top: 64,
+              left: 16,
+              right: 16,
+              child: SafeArea(child: BroadcastBanner()),
+            ),
+          ],
+        ),
       ),
       localizationsDelegates: const [
         AppLocalizations.delegate,

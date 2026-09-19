@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/l10n/app_localizations.dart';
 import '../../../core/theme/app_colors.dart';
@@ -128,6 +129,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                       color: AppColors.accentYellow,
                                       fontWeight: FontWeight.w600),
                                 ),
+                              ),
+                              const SizedBox(height: 8),
+                              OutlinedButton.icon(
+                                onPressed: () async {
+                                  final uri = Uri.parse('https://t.me/gamenftgrade');
+                                  if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                },
+                                icon: const Icon(Icons.send_rounded, size: 16),
+                                label: const Text('наш телеграм канал', style: TextStyle(fontWeight: FontWeight.w700)),
+                                style: OutlinedButton.styleFrom(foregroundColor: AppColors.accentYellow, side: BorderSide(color: AppColors.accentYellow.withOpacity(0.5))),
                               ),
                             ],
                           ),

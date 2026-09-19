@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/l10n/app_localizations.dart';
@@ -14,9 +15,46 @@ class TfaScreen extends ConsumerStatefulWidget {
   ConsumerState<TfaScreen> createState() => _TfaScreenState();
 }
 
-class _TfaScreenState extends ConsumerState<TfaScreen> {
+class _TfaScreenState extends ConsumerState<TfaScreen> with WidgetsBindingObserver {
   String _code = '';
   int _shake = 0;
+  final FocusNode _otpFocus = FocusNode();
+  final TextEditingController _otpController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _otpFocus.requestFocus();
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if ((state == AppLifecycleState.resumed || state == AppLifecycleState.inactive) && mounted) {
+      Future.delayed(const Duration(milliseconds: 250), () {
+        if (mounted) {
+          _otpFocus.requestFocus();
+          SystemChannels.textInput.invokeMethod('TextInput.show');
+        }
+      });
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted && !_otpFocus.hasFocus) {
+          _otpFocus.requestFocus();
+          SystemChannels.textInput.invokeMethod('TextInput.show');
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _otpFocus.dispose();
+    _otpController.dispose();
+    super.dispose();
+  }
 
   Future<void> _submit() async {
     if (_code.length != 6) {
@@ -76,6 +114,8 @@ class _TfaScreenState extends ConsumerState<TfaScreen> {
                               ),
                               const SizedBox(height: 26),
                               OtpInput(
+                                controller: _otpController,
+                                focusNode: _otpFocus,
                                 hasError:
                                     auth.errorCode == 'verify_err_code',
                                 onChanged: (v) {

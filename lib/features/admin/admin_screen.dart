@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -7,6 +8,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/widgets/brand_widgets.dart';
 import '../../core/widgets/top_notify.dart';
 import '../../core/widgets/user_badges.dart';
+import '../../data/models/user_model.dart';
 import '../../data/repositories/inventory_repository.dart';
 import '../../providers/balance_provider.dart';
 import '../../providers/session_provider.dart';
@@ -53,6 +55,9 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
 
     final tabs = [
       l10n.t('ad_tab_users'),
+      'Гифты',
+      'Кейсы',
+      'Ежедневки',
       l10n.t('ad_tab_events'),
       l10n.t('ad_tab_promo'),
       l10n.t('ad_tab_bc'),
@@ -96,9 +101,12 @@ class _AdminScreenState extends ConsumerState<AdminScreen> {
                 sliver: SliverToBoxAdapter(
                   child: switch (_tab) {
                     0 => const _UsersTab(),
-                    1 => const _EventsTab(),
-                    2 => const _PromoTab(),
-                    3 => const _BroadcastTab(),
+                    1 => const _GiftsTab(),
+                    2 => const _CasesTab(),
+                    3 => const _DailyAdminTab(),
+                    4 => const _EventsTab(),
+                    5 => const _PromoTab(),
+                    6 => const _BroadcastTab(),
                     _ => const _TicketsTab(),
                   },
                 ),
@@ -217,7 +225,7 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
     if (_selected == null) return;
     final coins = int.tryParse(_coins.text.trim()) ?? 0;
     if (coins == 0 && (_itemId == null || _itemId!.isEmpty)) {
-      _snack(context, context.l10n.t('ad_grant_hint'));
+      if (mounted) _snack(context, context.l10n.t('ad_grant_hint'));
       return;
     }
     try {
@@ -227,11 +235,35 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
         itemId: _itemId,
       );
       if (!mounted) return;
-      _snack(context, context.l10n.t('ad_granted'));
+      // Не крашим — TopNotify безопасно, даже если контекст уже не в дереве
+      try { _snack(context, context.l10n.t('ad_granted')); } catch (_) {}
       _coins.clear();
-      _search('');
+      if (mounted) {
+        // Обновляем список игроков без падения
+        try { await _search(''); } catch (_) {}
+        // Если выдали себе — обновляем свой инвентарь/баланс без кика
+        try {
+          final meNick = ref.read(userProvider).displayName.toLowerCase();
+          final targetNick = _selected!['nickname'].toString().toLowerCase();
+          if (meNick == targetNick) {
+            await ref.read(inventoryProvider.notifier).refresh();
+            final meRes = await ApiClient.instance.me();
+            final uj = (meRes['user'] ?? meRes) as Map<String, dynamic>?;
+            if (uj != null) {
+              // ignore: avoid_dynamic_calls
+              ref.read(userProvider.notifier).setUser(AppUser.fromServer(uj as Map<String, dynamic>));
+            }
+          }
+        } catch (_) {}
+      }
     } on ApiException catch (e) {
-      if (mounted) _snack(context, _apiError(context, e));
+      if (mounted) {
+        try { _snack(context, _apiError(context, e)); } catch (_) {}
+      }
+    } catch (e) {
+      if (mounted) {
+        try { _snack(context, 'Ошибка: $e'); } catch (_) {}
+      }
     }
   }
 
@@ -440,7 +472,7 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
                     ],
                   ),
                   const SizedBox(height: 10),
-                  Row(
+                    Row(
                     children: [
                       Expanded(
                         child: OutlinedButton(
@@ -466,6 +498,44 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        icon: Icon((_selected!['hide_from_top'] == true) ? Icons.visibility_off_rounded : Icons.visibility_rounded, size: 16),
+                        label: Text((_selected!['hide_from_top'] == true) ? 'Показать в топе' : 'Скрыть из топа'),
+                        onPressed: () async {
+                          final hide = _selected!['hide_from_top'] != true;
+                          try {
+                            await ApiClient.instance.adminHideTop(nickname: _selected!['nickname'].toString(), hide: hide);
+                            setState(() => _selected!['hide_from_top'] = hide);
+                            _snack(context, hide ? 'Скрыт из топа' : 'Показан в топе');
+                          } catch (e) {
+                            if (mounted) _snack(context, 'Ошибка');
+                          }
+                        },
+                      ),
+                    ),
+                  ]),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+                      icon: const Icon(Icons.delete_forever_rounded, size: 18),
+                      label: const Text('Обнулить всех игроков (wipe)'),
+                      onPressed: () async {
+                        final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(title: const Text('Обнулить всех?'), content: const Text('Удалит инвентарь, раунды, баланс (кроме админов). Подтвердите WIPE.'), actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')), FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('WIPE'))]));
+                        if (ok != true) return;
+                        try {
+                          await ApiClient.instance.adminWipe();
+                          if (mounted) _snack(context, 'Все игроки обнулены ✅');
+                        } catch (e) {
+                          if (mounted) _snack(context, 'Ошибка wipe');
+                        }
+                      },
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -473,6 +543,289 @@ class _UsersTabState extends ConsumerState<_UsersTab> {
         ],
       ],
     );
+  }
+}
+
+// ── Гифты CRUD ──
+class _GiftsTab extends ConsumerStatefulWidget {
+  const _GiftsTab();
+  @override
+  ConsumerState<_GiftsTab> createState() => _GiftsTabState();
+}
+class _GiftsTabState extends ConsumerState<_GiftsTab> {
+  List<Map<String, dynamic>> _items = [];
+  bool _loading = true;
+  final _search = TextEditingController();
+  @override
+  void initState() { super.initState(); _load(); }
+  @override
+  void dispose() { _search.dispose(); super.dispose(); }
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final res = await ApiClient.instance.adminItems(_search.text.trim());
+      if (!mounted) return;
+      setState(() => _items = ((res['items'] as List?) ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList());
+    } catch (_) {} finally { if (mounted) setState(() => _loading = false); }
+  }
+  Future<void> _showEdit({Map<String, dynamic>? item}) async {
+    final isNew = item == null;
+    final idCtrl = TextEditingController(text: item?['id']?.toString() ?? '');
+    final nameCtrl = TextEditingController(text: item?['name']?.toString() ?? '');
+    final priceCtrl = TextEditingController(text: item?['price_coins']?.toString() ?? '');
+    final rarityCtrl = ValueNotifier<String>(item?['rarity']?.toString() ?? 'common');
+    final collCtrl = TextEditingController(text: item?['collection']?.toString() ?? '');
+    final imgCtrl = TextEditingController(text: item?['image_asset']?.toString() ?? '');
+    final urlCtrl = TextEditingController(text: item?['image_url']?.toString() ?? '');
+    final active = ValueNotifier<bool>(item?['is_active'] ?? true);
+    final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: Text(isNew ? 'Новый гифт' : 'Редактировать'),
+      content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextField(controller: idCtrl, enabled: isNew, decoration: const InputDecoration(labelText: 'ID (present, cup...)', border: OutlineInputBorder())),
+        const SizedBox(height: 8),
+        TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Название', border: OutlineInputBorder())),
+        const SizedBox(height: 8),
+        TextField(controller: priceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Цена (монеты)', border: OutlineInputBorder())),
+        const SizedBox(height: 8),
+        ValueListenableBuilder<String>(valueListenable: rarityCtrl, builder: (_, v, __) => DropdownButtonFormField<String>(value: v, decoration: const InputDecoration(labelText: 'Редкость', border: OutlineInputBorder()), items: const [DropdownMenuItem(value: 'common', child: Text('Common')), DropdownMenuItem(value: 'rare', child: Text('Rare')), DropdownMenuItem(value: 'epic', child: Text('Epic')), DropdownMenuItem(value: 'legendary', child: Text('Legendary'))], onChanged: (x) => rarityCtrl.value = x ?? 'common')),
+        const SizedBox(height: 8),
+        TextField(controller: collCtrl, decoration: const InputDecoration(labelText: 'Коллекция', border: OutlineInputBorder())),
+        const SizedBox(height: 8),
+        TextField(controller: imgCtrl, decoration: const InputDecoration(labelText: 'image_asset (present.png)', border: OutlineInputBorder())),
+        const SizedBox(height: 8),
+        TextField(controller: urlCtrl, decoration: const InputDecoration(labelText: 'image_url (опц.)', border: OutlineInputBorder())),
+        const SizedBox(height: 8),
+        ValueListenableBuilder<bool>(valueListenable: active, builder: (_, v, __) => SwitchListTile(title: const Text('Активен'), value: v, onChanged: (x) => active.value = x)),
+      ])),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')), FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(isNew ? 'Создать' : 'Сохранить'))],
+    ));
+    if (ok != true) return;
+    try {
+      if (isNew) {
+        await ApiClient.instance.createAdminItem({'id': idCtrl.text.trim(), 'name': nameCtrl.text.trim(), 'price_coins': int.tryParse(priceCtrl.text) ?? 0, 'rarity': rarityCtrl.value, 'collection': collCtrl.text.trim(), 'image_asset': imgCtrl.text.trim(), 'image_url': urlCtrl.text.trim()});
+      } else {
+        await ApiClient.instance.updateAdminItem(item!['id'].toString(), {'name': nameCtrl.text.trim(), 'price_coins': int.tryParse(priceCtrl.text) ?? 0, 'rarity': rarityCtrl.value, 'collection': collCtrl.text.trim(), 'image_asset': imgCtrl.text.trim(), 'image_url': urlCtrl.text.trim(), 'is_active': active.value});
+      }
+      _snack(context, 'Сохранено ✅');
+      _load();
+      ref.read(catalogProvider.notifier).refresh();
+    } on ApiException catch (e) { _snack(context, _apiError(context, e)); }
+  }
+  Future<void> _delete(String id) async {
+    try { await ApiClient.instance.deleteAdminItem(id); _snack(context, 'Удалено'); _load(); ref.read(catalogProvider.notifier).refresh(); } on ApiException catch (e) { _snack(context, _apiError(context, e)); }
+  }
+  @override
+  Widget build(BuildContext context) {
+    return Column(children: [
+      BrandCard(child: Row(children: [
+        Expanded(child: TextField(controller: _search, decoration: InputDecoration(hintText: 'Поиск по id/имени', prefixIcon: const Icon(Icons.search, size: 18), border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)), contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10)), onSubmitted: (_) => _load())),
+        const SizedBox(width: 8),
+        FilledButton.icon(onPressed: _load, icon: const Icon(Icons.refresh, size: 16), label: const Text('Найти')),
+        const SizedBox(width: 8),
+        FilledButton.tonalIcon(onPressed: () => _showEdit(), icon: const Icon(Icons.add), label: const Text('Новый')),
+      ])),
+      const SizedBox(height: 12),
+      if (_loading) const BrandCard(child: Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()))),
+      for (final it in _items) Padding(padding: const EdgeInsets.only(bottom: 8), child: BrandCard(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10), child: Row(children: [
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('${it['name']} (${it['id']})', style: const TextStyle(fontWeight: FontWeight.w800)), 
+          Text('${it['price_coins']} монет · ${it['rarity']} ${it['is_active']==false ? '· скрыт' : ''}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+        ])),
+        IconButton(icon: const Icon(Icons.edit, size: 18), onPressed: () => _showEdit(item: it)),
+        IconButton(icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red), onPressed: () => _delete(it['id'].toString())),
+      ]))),
+    ]);
+  }
+}
+
+// ── Кейсы CRUD ──
+class _CasesTab extends ConsumerStatefulWidget {
+  const _CasesTab();
+  @override
+  ConsumerState<_CasesTab> createState() => _CasesTabState();
+}
+class _CasesTabState extends ConsumerState<_CasesTab> {
+  List<Map<String, dynamic>> _cases = [];
+  bool _loading = true;
+  @override
+  void initState() { super.initState(); _load(); }
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final res = await ApiClient.instance.adminCasesAdmin();
+      if (!mounted) return;
+      setState(() => _cases = ((res['cases'] as List?) ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList());
+    } catch (_) {} finally { if (mounted) setState(() => _loading = false); }
+  }
+  Future<void> _showEdit({Map<String, dynamic>? c}) async {
+    final isNew = c == null;
+    final idCtrl = TextEditingController(text: c?['id']?.toString() ?? '');
+    final nameCtrl = TextEditingController(text: c?['name']?.toString() ?? '');
+    final priceCtrl = TextEditingController(text: c?['price_nc']?.toString() ?? '');
+    final imgCtrl = TextEditingController(text: c?['image_asset']?.toString() ?? '');
+    final sortCtrl = TextEditingController(text: c?['sort_order']?.toString() ?? '0');
+    final active = ValueNotifier<bool>(c?['is_active'] ?? true);
+    final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: Text(isNew ? 'Новый кейс' : 'Редактировать кейс'),
+      content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextField(controller: idCtrl, enabled: isNew, decoration: const InputDecoration(labelText: 'ID (case_mega)', border: OutlineInputBorder())),
+        const SizedBox(height: 8),
+        TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Название', border: OutlineInputBorder())),
+        const SizedBox(height: 8),
+        TextField(controller: priceCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Цена NC', border: OutlineInputBorder())),
+        const SizedBox(height: 8),
+        TextField(controller: imgCtrl, decoration: const InputDecoration(labelText: 'image_asset (case_xxx.png)', border: OutlineInputBorder())),
+        const SizedBox(height: 8),
+        TextField(controller: sortCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Сортировка', border: OutlineInputBorder())),
+        ValueListenableBuilder<bool>(valueListenable: active, builder: (_, v, __) => SwitchListTile(title: const Text('Активен'), value: v, onChanged: (x) => active.value = x)),
+      ])),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')), FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(isNew ? 'Создать' : 'Сохранить'))],
+    ));
+    if (ok != true) return;
+    try {
+      if (isNew) {
+        await ApiClient.instance.createAdminCase({'id': idCtrl.text.trim(), 'name': nameCtrl.text.trim(), 'price_nc': int.tryParse(priceCtrl.text) ?? 0, 'image_asset': imgCtrl.text.trim(), 'sort_order': int.tryParse(sortCtrl.text) ?? 0});
+      } else {
+        await ApiClient.instance.updateAdminCase(c!['id'].toString(), {'name': nameCtrl.text.trim(), 'price_nc': int.tryParse(priceCtrl.text) ?? 0, 'image_asset': imgCtrl.text.trim(), 'sort_order': int.tryParse(sortCtrl.text) ?? 0, 'is_active': active.value});
+      }
+      _snack(context, 'Сохранено ✅'); _load();
+    } on ApiException catch (e) { _snack(context, _apiError(context, e)); }
+  }
+  Future<void> _editItems(String caseId) async {
+    List<Map<String, dynamic>> items = [];
+    try {
+      final res = await ApiClient.instance.adminCaseItems(caseId);
+      items = ((res['items'] as List?) ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    } catch (_) {}
+    final catalog = ref.read(catalogProvider);
+    // локальная копия для редактирования — теперь шанс редактируемый для любого кейса
+    final editList = items.map((e) => {'item_id': e['item_id'].toString(), 'drop_chance': e['drop_chance'].toString()}).toList();
+    final chanceCtrls = <TextEditingController>[];
+    for (final e in editList) {
+      chanceCtrls.add(TextEditingController(text: e['drop_chance'].toString()));
+    }
+    await showDialog(context: context, builder: (ctx) => StatefulBuilder(builder: (ctx, setS) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: Text('Предметы кейса $caseId — можно менять любой кейс'),
+      content: SizedBox(width: 460, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        if (editList.isEmpty) const Text('Пусто — добавь предметы', style: TextStyle(color: Colors.grey)),
+        for (int i = 0; i < editList.length; i++) Padding(padding: const EdgeInsets.only(bottom: 8), child: Row(children: [
+          Expanded(flex: 3, child: Text(editList[i]['item_id'].toString(), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
+          const SizedBox(width: 8),
+          SizedBox(width: 90, child: TextField(controller: chanceCtrls[i], keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: '%', border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8)), onChanged: (v) => editList[i]['drop_chance'] = v)),
+          IconButton(icon: const Icon(Icons.close, size: 16), onPressed: () => setS(() { editList.removeAt(i); chanceCtrls.removeAt(i).dispose(); })),
+        ])),
+        const Divider(),
+        DropdownButtonFormField<String>(hint: const Text('Гифт'), items: [for (final it in catalog) DropdownMenuItem(value: it.id, child: Text('${it.name} ${it.priceInCoins}'))], onChanged: (v) { if (v != null) setS(() { editList.add({'item_id': v, 'drop_chance': '10'}); chanceCtrls.add(TextEditingController(text: '10')); }); }, decoration: const InputDecoration(labelText: 'Добавить гифт в этот кейс', border: OutlineInputBorder())),
+        const SizedBox(height: 8),
+        Builder(builder: (_) {
+          final sum = editList.fold<double>(0, (s,e)=> s + (double.tryParse(e['drop_chance'].toString())??0));
+          final ok = (sum - 100).abs() < 0.01;
+          return Text('Сумма: ${sum.toStringAsFixed(2)}% ${ok ? '✓' : '(должно быть 100%)'}', style: TextStyle(fontSize: 11, color: ok ? Colors.green : Colors.red, fontWeight: FontWeight.w700));
+        }),
+      ]))),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена')), FilledButton(onPressed: () async {
+        for (int i=0;i<editList.length;i++) editList[i]['drop_chance'] = chanceCtrls[i].text;
+        final payload = editList.map((e) => {'item_id': e['item_id'], 'drop_chance': double.tryParse(e['drop_chance'].toString()) ?? 0}).toList();
+        try { await ApiClient.instance.setAdminCaseItems(caseId, payload); _snack(context, 'Сохранено ✅ для $caseId'); Navigator.pop(ctx); } on ApiException catch (e) { _snack(context, _apiError(context, e)); }
+      }, child: const Text('Сохранить'))],
+    )));
+    for (final c in chanceCtrls) c.dispose();
+  }
+  Future<void> _delete(String id) async {
+    try { await ApiClient.instance.deleteAdminCase(id); _snack(context, 'Удалено'); _load(); } on ApiException catch (e) { _snack(context, _apiError(context, e)); }
+  }
+  @override
+  Widget build(BuildContext context) {
+    return Column(children: [
+      BrandCard(child: Row(children: [const Text('Кейсы', style: TextStyle(fontWeight: FontWeight.w800)), const Spacer(), FilledButton.tonalIcon(onPressed: () => _showEdit(), icon: const Icon(Icons.add), label: const Text('Новый'))])),
+      const SizedBox(height: 12),
+      if (_loading) const BrandCard(child: Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()))),
+      for (final c in _cases) Padding(padding: const EdgeInsets.only(bottom: 8), child: BrandCard(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(child: Text('${c['name']} (${c['id']}) — ${c['price_nc']} NC ${c['is_active']==false ? '· скрыт' : ''}', style: const TextStyle(fontWeight: FontWeight.w800))),
+          IconButton(icon: const Icon(Icons.edit, size: 18), onPressed: () => _showEdit(c: c)),
+          IconButton(icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red), onPressed: () => _delete(c['id'].toString())),
+        ]),
+        const SizedBox(height: 6),
+        Row(children: [
+          OutlinedButton(onPressed: () => _editItems(c['id'].toString()), child: const Text('Предметы')),
+        ]),
+      ]))),
+    ]);
+  }
+}
+
+// ── Ежедневки ──
+class _DailyAdminTab extends ConsumerStatefulWidget {
+  const _DailyAdminTab();
+  @override
+  ConsumerState<_DailyAdminTab> createState() => _DailyAdminTabState();
+}
+class _DailyAdminTabState extends ConsumerState<_DailyAdminTab> {
+  List<Map<String, dynamic>> _tasks = [];
+  bool _loading = true;
+  @override
+  void initState() { super.initState(); _load(); }
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final res = await ApiClient.instance.dailyTasksAdmin();
+      if (!mounted) return;
+      setState(() => _tasks = ((res['tasks'] as List?) ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList());
+    } catch (_) {} finally { if (mounted) setState(() => _loading = false); }
+  }
+  Future<void> _edit({Map<String, dynamic>? t}) async {
+    final isNew = t == null;
+    final idCtrl = TextEditingController(text: t?['id']?.toString() ?? '');
+    final titleCtrl = TextEditingController(text: t?['title']?.toString() ?? '');
+    final descCtrl = TextEditingController(text: t?['description']?.toString() ?? '');
+    final coinsCtrl = TextEditingController(text: t?['reward_coins']?.toString() ?? '100');
+    final itemCtrl = TextEditingController(text: t?['reward_item_id']?.toString() ?? '');
+    final typeCtrl = ValueNotifier<String>(t?['requirement_type']?.toString() ?? 'login');
+    final countCtrl = TextEditingController(text: t?['requirement_count']?.toString() ?? '1');
+    final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: Text(isNew ? 'Новое задание' : 'Редактировать'),
+      content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextField(controller: idCtrl, enabled: isNew, decoration: const InputDecoration(labelText: 'ID', border: OutlineInputBorder())),
+        const SizedBox(height: 8),
+        TextField(controller: titleCtrl, decoration: const InputDecoration(labelText: 'Название', border: OutlineInputBorder())),
+        const SizedBox(height: 8),
+        TextField(controller: descCtrl, decoration: const InputDecoration(labelText: 'Описание', border: OutlineInputBorder())),
+        const SizedBox(height: 8),
+        TextField(controller: coinsCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Монеты награда', border: OutlineInputBorder())),
+        const SizedBox(height: 8),
+        TextField(controller: itemCtrl, decoration: const InputDecoration(labelText: 'Гифт reward_item_id (опц)', border: OutlineInputBorder())),
+        const SizedBox(height: 8),
+        ValueListenableBuilder<String>(valueListenable: typeCtrl, builder: (_, v, __) => DropdownButtonFormField<String>(value: v, decoration: const InputDecoration(labelText: 'Тип', border: OutlineInputBorder()), items: const [DropdownMenuItem(value: 'login', child: Text('login')), DropdownMenuItem(value: 'upgrade', child: Text('upgrade')), DropdownMenuItem(value: 'case_open', child: Text('case_open')), DropdownMenuItem(value: 'trade', child: Text('trade'))], onChanged: (x) => typeCtrl.value = x ?? 'login')),
+        const SizedBox(height: 8),
+        TextField(controller: countCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Количество', border: OutlineInputBorder())),
+      ])),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')), FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(isNew ? 'Создать' : 'Сохранить'))],
+    ));
+    if (ok != true) return;
+    try {
+      await ApiClient.instance.createDailyTask({'id': idCtrl.text.trim(), 'title': titleCtrl.text.trim(), 'description': descCtrl.text.trim(), 'reward_coins': int.tryParse(coinsCtrl.text) ?? 0, 'reward_item_id': itemCtrl.text.trim().isEmpty ? null : itemCtrl.text.trim(), 'requirement_type': typeCtrl.value, 'requirement_count': int.tryParse(countCtrl.text) ?? 1});
+      _snack(context, 'Сохранено ✅'); _load();
+    } on ApiException catch (e) { _snack(context, _apiError(context, e)); }
+  }
+  @override
+  Widget build(BuildContext context) {
+    return Column(children: [
+      BrandCard(child: Row(children: [const Text('Ежедневные задания', style: TextStyle(fontWeight: FontWeight.w800)), const Spacer(), FilledButton.tonalIcon(onPressed: () => _edit(), icon: const Icon(Icons.add), label: const Text('Новое'))])),
+      const SizedBox(height: 12),
+      if (_loading) const BrandCard(child: Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()))),
+      for (final t in _tasks) Padding(padding: const EdgeInsets.only(bottom: 8), child: BrandCard(padding: const EdgeInsets.all(12), child: Row(children: [
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('${t['title']} (${t['id']})', style: const TextStyle(fontWeight: FontWeight.w800)),
+          Text('${t['description']} · ${t['reward_coins']} монет ${t['reward_item_id'] != null ? '+ гифт' : ''} · ${t['requirement_type']} x${t['requirement_count']}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+        ])),
+        IconButton(icon: const Icon(Icons.edit, size: 18), onPressed: () => _edit(t: t)),
+      ]))),
+    ]);
   }
 }
 
@@ -489,6 +842,7 @@ class _EventsTabState extends ConsumerState<_EventsTab> {
   Map<String, String> _settings = {};
   bool _loading = true;
   final _musicUrl = TextEditingController();
+  List<String> _musicFiles = [];
 
   static const _eventModes = ['auto', 'on', 'off'];
   static const _eventKeys = ['event_x2', 'event_x4', 'event_saves'];
@@ -504,10 +858,69 @@ class _EventsTabState extends ConsumerState<_EventsTab> {
     _load();
   }
 
+  bool _uploadingMusic = false;
   @override
   void dispose() {
     _musicUrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _uploadMusic() async {
+    try {
+      // ignore: avoid_web_libraries_in_flutter
+      final res = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['mp3', 'wav', 'ogg', 'm4a', 'aac'], withData: false);
+      if (res == null || res.files.isEmpty) return;
+      final path = res.files.single.path;
+      if (path == null) {
+        _snack(context, 'Не удалось прочитать файл');
+        return;
+      }
+      setState(() => _uploadingMusic = true);
+      final r = await ApiClient.instance.uploadMusic(path);
+      if (!mounted) return;
+      final url = r['url']?.toString() ?? r['path']?.toString() ?? '';
+      if (url.isNotEmpty) {
+        setState(() {
+          _musicUrl.text = url;
+          _settings['music_url'] = url;
+          _settings['music_on'] = 'on';
+        });
+        ref.read(appSettingsProvider.notifier).refresh();
+        ref.read(eventsProvider.notifier).refresh();
+        _snack(context, 'Музыка загружена и включена ✅');
+        _load();
+      } else {
+        _snack(context, 'Загружено, но URL не получен');
+      }
+    } on ApiException catch (e) {
+      if (mounted) _snack(context, _apiError(context, e));
+    } catch (e) {
+      if (mounted) _snack(context, 'Ошибка загрузки: $e');
+    } finally {
+      if (mounted) setState(() => _uploadingMusic = false);
+    }
+  }
+
+  Future<void> _playMusicFile(String file) async {
+    try {
+      await ApiClient.instance.musicPlay(file);
+      if (!mounted) return;
+      _snack(context, 'Включено: $file 🔊');
+      _load();
+    } on ApiException catch (e) {
+      if (mounted) _snack(context, _apiError(context, e));
+    }
+  }
+
+  Future<void> _stopMusic() async {
+    try {
+      await ApiClient.instance.musicStop();
+      if (!mounted) return;
+      _snack(context, 'Музыка остановлена ⏹️');
+      _load();
+    } on ApiException catch (e) {
+      if (mounted) _snack(context, _apiError(context, e));
+    }
   }
 
   Future<void> _load() async {
@@ -520,6 +933,11 @@ class _EventsTabState extends ConsumerState<_EventsTab> {
         _settings = map;
         _musicUrl.text = map['music_url'] ?? '';
       });
+      // список музыки из папки server/public/music
+      try {
+        final m = await ApiClient.instance.musicList();
+        if (mounted) setState(() => _musicFiles = ((m['files'] as List?) ?? const []).map((e) => e.toString()).toList());
+      } catch (_) {}
     } catch (_) {
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -527,6 +945,33 @@ class _EventsTabState extends ConsumerState<_EventsTab> {
   }
 
   Future<void> _set(String key, String value) async {
+    // Ручное включение с выбором времени — спрашиваем на сколько включить
+    if (value == 'on' && (key == 'event_x2' || key == 'event_saves' || key == 'event_x4')) {
+      final minutes = await showDialog<int>(context: context, builder: (ctx) => SimpleDialog(title: const Text('На сколько включить?'), children: [
+        for (final m in [15, 30, 60, 120, 360, 720, 1440])
+          SimpleDialogOption(onPressed: () => Navigator.pop(ctx, m), child: Text('${m < 60 ? '$m мин' : '${m ~/ 60} ч'}')),
+      ]));
+      if (minutes == null) return;
+      try {
+        final evKey = key.replaceFirst('event_', '');
+        await ApiClient.instance.adminEventOn(evKey, minutes);
+        if (!mounted) return;
+        setState(() => _settings[key] = value);
+        ref.read(eventsProvider.notifier).refresh();
+        _snack(context, 'Включено на ${minutes}м ✅');
+        _load();
+        return;
+      } on ApiException catch (e) {
+        if (mounted) _snack(context, _apiError(context, e));
+        return;
+      }
+    }
+    if (value == 'off' && (key == 'event_x2' || key == 'event_saves' || key == 'event_x4')) {
+      try {
+        final evKey = key.replaceFirst('event_', '');
+        await ApiClient.instance.adminEventOff(evKey);
+      } catch (_) {}
+    }
     try {
       await ApiClient.instance.setAdminSetting(key, value);
       if (!mounted) return;
@@ -613,12 +1058,26 @@ class _EventsTabState extends ConsumerState<_EventsTab> {
                   controller: _musicUrl,
                   decoration: InputDecoration(
                     labelText: l10n.t('ad_music_url'),
+                    hintText: 'https://.../music.mp3 или загрузите файл ниже',
                     contentPadding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 10),
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12)),
                   ),
                 ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _uploadingMusic ? null : _uploadMusic,
+                    icon: _uploadingMusic
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.upload_file_rounded, size: 18),
+                    label: Text(_uploadingMusic ? 'Загрузка...' : 'Загрузить файл с устройства (mp3/wav)'),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text('Загрузите файл на сервер — он автоматом включится у всех игроков. Или вставьте URL вручную.', style: const TextStyle(fontSize: 11, color: Colors.grey, decoration: TextDecoration.none)),
                 const SizedBox(height: 10),
                 Row(
                   children: [
@@ -645,6 +1104,35 @@ class _EventsTabState extends ConsumerState<_EventsTab> {
                     ),
                   ],
                 ),
+                if (_musicFiles.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  const Divider(),
+                  const SizedBox(height: 8),
+                  const Text('Файлы в server/public/music (залей папку на сервер):', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, decoration: TextDecoration.none)),
+                  const SizedBox(height: 8),
+                  for (final f in _musicFiles)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        decoration: BoxDecoration(color: Colors.black.withOpacity(0.25), borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.white10)),
+                        child: Row(children: [
+                          const Icon(Icons.music_note_rounded, size: 16, color: Colors.white70),
+                          const SizedBox(width: 8),
+                          Expanded(child: Text(f, style: const TextStyle(fontSize: 12, decoration: TextDecoration.none), overflow: TextOverflow.ellipsis)),
+                          const SizedBox(width: 8),
+                          FilledButton.tonalIcon(onPressed: () => _playMusicFile(f), icon: const Icon(Icons.play_arrow_rounded, size: 16), label: const Text('Вкл', style: TextStyle(fontSize: 12))),
+                        ]),
+                      ),
+                    ),
+                  const SizedBox(height: 8),
+                  SizedBox(width: double.infinity, child: OutlinedButton.icon(onPressed: _stopMusic, icon: const Icon(Icons.stop_rounded, size: 16), label: const Text('Остановить музыку у всех'))),
+                ] else ...[
+                  const SizedBox(height: 10),
+                  Text('Папка server/public/music пуста — залей туда mp3/wav и нажми Обновить.', style: TextStyle(fontSize: 11, color: Colors.grey[500], decoration: TextDecoration.none)),
+                  const SizedBox(height: 6),
+                  OutlinedButton.icon(onPressed: _load, icon: const Icon(Icons.refresh_rounded, size: 16), label: const Text('Обновить список')),
+                ],
               ],
             ),
           ),
@@ -719,6 +1207,19 @@ class _PromoTabState extends ConsumerState<_PromoTab> {
       _maxUses.clear();
       await _load();
       _snack(context, context.l10n.t('ad_promo_created'));
+    } on ApiException catch (e) {
+      if (mounted) _snack(context, _apiError(context, e));
+    }
+  }
+
+  Future<void> _deletePromo(String code) async {
+    final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(title: const Text('Удалить промокод?'), content: Text('Удалить $code ?'), actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')), FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Удалить'))]));
+    if (ok != true) return;
+    try {
+      await ApiClient.instance.deletePromocode(code);
+      if (!mounted) return;
+      await _load();
+      _snack(context, 'Промокод $code удалён');
     } on ApiException catch (e) {
       if (mounted) _snack(context, _apiError(context, e));
     }
@@ -860,6 +1361,8 @@ class _PromoTabState extends ConsumerState<_PromoTab> {
                           ? Colors.green
                           : Colors.grey,
                     ),
+                    const SizedBox(width: 8),
+                    IconButton(icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Colors.redAccent), onPressed: () => _deletePromo(_promos[i]['code'].toString()), tooltip: 'Удалить'),
                   ],
                 ),
               ),
